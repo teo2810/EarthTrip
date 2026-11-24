@@ -37,6 +37,8 @@ const RIM = 1.1;
 const MOON_ORBIT = 2.48;
 const ZOOM_MIN = 0.62;
 const ZOOM_MAX = 4.1;
+const LAUNCH_ANGLE = -1.2;
+const EXTRA_ANGLES = [Math.PI, 0.2, 2.45, -2.45, 1.35];
 const UNLOCK: Record<WeaponId, number> = { base: 0, mg: 90, multi: 140, homing: 200 };
 
 export function createDefenseMode(hooks: DefenseHooks) {
@@ -73,6 +75,8 @@ export function createDefenseMode(hooks: DefenseHooks) {
   let aimAngle = Math.PI / 2;
   let spawnTimer = 0;
   let fireCooldown = 0;
+  let extraCooldown = 0.2;
+  let launcherCooldown = 0.35;
   let waveTimer = 0;
   let camT = 1;
   let phase: "idle" | "enter" | "play" | "exit" | "boom" = "idle";
@@ -80,6 +84,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
   let moonArc: THREE.Mesh | null = null;
   let aimLine: THREE.Line | null = null;
   let cross: THREE.Group | null = null;
+  let launcher: THREE.Group | null = null;
   let arcProgress = -1;
   let zoom = 1;
   let boomT = 0;
@@ -129,6 +134,12 @@ export function createDefenseMode(hooks: DefenseHooks) {
 
   function slotCost(id: WeaponId | "cannon") {
     if (id === "cannon") return state.cannonCount >= 6 ? 0 : 70 + (state.cannonCount - 1) * 45;
+    if (id === "homing") {
+      const lv = state.levels.homing;
+      if (lv <= 0) return UNLOCK.homing;
+      if (lv < 5) return 55 * lv;
+      return 0;
+    }
     const lv = state.levels[id];
     if (lv <= 0) return UNLOCK[id];
     if (state.weaponType === id && lv < 5) return 55 * lv;
@@ -137,6 +148,20 @@ export function createDefenseMode(hooks: DefenseHooks) {
 
   function slotMeta(id: WeaponId | "cannon") {
     const cost = slotCost(id);
+    if (id === "homing") {
+      const level = state.levels.homing;
+      const maxed = level >= 5;
+      const action: "buy" | "upgrade" | "select" | "max" = maxed ? "max" : level <= 0 ? "buy" : "upgrade";
+      return {
+        id,
+        level,
+        cost,
+        owned: level > 0,
+        selected: level > 0,
+        action,
+        affordable: action !== "max" && cost > 0 && state.exp >= cost,
+      };
+    }
     const level = id === "cannon" ? state.cannonCount : state.levels[id];
     const owned = id === "cannon" || level > 0;
     const selected = id !== "cannon" && state.weaponType === id;
@@ -193,21 +218,57 @@ export function createDefenseMode(hooks: DefenseHooks) {
     return g;
   }
 
+  function makeLauncher() {
+    const g = new THREE.Group();
+    const pod = new THREE.Mesh(
+      new THREE.BoxGeometry(0.22, 0.16, 0.08),
+      new THREE.MeshStandardMaterial({
+        color: 0xffb15a,
+        emissive: 0x5a2a08,
+        emissiveIntensity: 0.7,
+        metalness: 0.4,
+        roughness: 0.35,
+      }),
+    );
+    pod.position.x = 0.08;
+    const tubeMat = new THREE.MeshStandardMaterial({
+      color: 0xffe0a8,
+      emissive: 0xff9a2a,
+      emissiveIntensity: 0.45,
+      metalness: 0.3,
+      roughness: 0.4,
+    });
+    const left = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.28, 8), tubeMat);
+    const right = left.clone();
+    left.rotation.z = Math.PI / 2;
+    right.rotation.z = Math.PI / 2;
+    left.position.set(0.16, 0.045, 0);
+    right.position.set(0.16, -0.045, 0);
+    g.add(pod, left, right);
+    hooks.getScene().add(g);
+    return g;
+  }
+
   function syncCannons() {
-    while (cannons.length < state.cannonCount) cannons.push(makeCannon(cannons.length === 0));
-    while (cannons.length > state.cannonCount) {
+    const need = state.cannonCount;
+    while (cannons.length < need) cannons.push(makeCannon(cannons.length === 0));
+    while (cannons.length > need) {
       const g = cannons.pop();
       if (g) hooks.getScene().remove(g);
     }
-    const n = cannons.length;
-    const spread = 0.38;
+    const show = phase === "play" || phase === "enter";
     cannons.forEach((g, i) => {
-      const offset = n === 1 ? 0 : (i - (n - 1) / 2) * spread;
-      const a = aimAngle + offset;
+      const a = i === 0 ? aimAngle : EXTRA_ANGLES[i - 1] ?? Math.PI;
       g.position.set(Math.cos(a) * RIM, Math.sin(a) * RIM, 0.04);
       g.rotation.set(0, 0, a);
-      g.visible = phase === "play" || phase === "enter";
+      g.visible = show;
     });
+    if (state.levels.homing > 0 && !launcher) launcher = makeLauncher();
+    if (launcher) {
+      launcher.position.set(Math.cos(LAUNCH_ANGLE) * RIM, Math.sin(LAUNCH_ANGLE) * RIM, 0.05);
+      launcher.rotation.set(0, 0, LAUNCH_ANGLE);
+      launcher.visible = show && state.levels.homing > 0;
+    }
   }
 
   function ensureAimGfx() {
@@ -371,23 +432,34 @@ export function createDefenseMode(hooks: DefenseHooks) {
     });
   }
 
-  function fireAll() {
-    const w = state.weaponType;
+  function rifleId(): WeaponId {
+    return state.weaponType === "mg" || state.weaponType === "multi" ? state.weaponType : "base";
+  }
+
+  function fireMain() {
+    const w = rifleId();
     const lv = Math.max(1, state.levels[w]);
-    const dmg = (w === "mg" ? 0.5 : w === "homing" ? 1.35 : w === "multi" ? 0.85 : 1.2) * (0.75 + 0.28 * lv);
-    const speed = w === "mg" ? 7.2 : w === "homing" ? 4.4 : 6.2;
-    const color = w === "homing" ? 0xffc14d : w === "mg" ? 0xb8fff4 : 0x7dfff0;
+    const dmg = (w === "mg" ? 0.5 : w === "multi" ? 0.85 : 1.2) * (0.75 + 0.28 * lv);
+    const speed = w === "mg" ? 7.2 : 6.2;
+    const color = w === "mg" ? 0xb8fff4 : 0x7dfff0;
     const fan = w === "multi" ? 2 + Math.min(2, lv - 1) : 1;
     const fanSpread = 0.16;
-    const n = cannons.length;
-    const turretSpread = 0.38;
-    for (let i = 0; i < n; i += 1) {
-      const offset = n === 1 ? 0 : (i - (n - 1) / 2) * turretSpread;
-      for (let s = 0; s < fan; s += 1) {
-        const extra = fan === 1 ? 0 : (s - (fan - 1) / 2) * fanSpread;
-        fireOne(aimAngle + offset + extra, w === "homing", speed, dmg, color);
-      }
+    for (let s = 0; s < fan; s += 1) {
+      const extra = fan === 1 ? 0 : (s - (fan - 1) / 2) * fanSpread;
+      fireOne(aimAngle + extra, false, speed, dmg, color);
     }
+  }
+
+  function fireExtras() {
+    for (let i = 1; i < cannons.length; i += 1) {
+      fireOne(EXTRA_ANGLES[i - 1] ?? Math.PI, false, 6.1, 1.05, 0xb7c6d6);
+    }
+  }
+
+  function fireLauncher() {
+    const lv = state.levels.homing;
+    if (lv <= 0) return;
+    fireOne(LAUNCH_ANGLE, true, 4.2, 1.15 * (0.75 + 0.28 * lv), 0xffc14d);
   }
 
   function clearActors() {
@@ -399,6 +471,8 @@ export function createDefenseMode(hooks: DefenseHooks) {
     particles.length = 0;
     for (const g of cannons) hooks.getScene().remove(g);
     cannons.length = 0;
+    if (launcher) hooks.getScene().remove(launcher);
+    launcher = null;
     if (aimLine) hooks.getScene().remove(aimLine);
     if (cross) hooks.getScene().remove(cross);
     if (moonRing) hooks.getScene().remove(moonRing);
@@ -460,6 +534,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
     if (aimLine) aimLine.visible = false;
     if (cross) cross.visible = false;
     for (const cannon of cannons) cannon.visible = false;
+    if (launcher) launcher.visible = false;
     const scene = hooks.getScene();
     for (let i = 0; i < 56; i += 1) {
       const hot = i % 4;
@@ -687,13 +762,25 @@ export function createDefenseMode(hooks: DefenseHooks) {
       }
     }
 
-    const w = state.weaponType;
-    const lv = Math.max(1, state.levels[w]);
-    const interval = w === "mg" ? 0.1 / (1 + (lv - 1) * 0.12) : w === "multi" ? 0.42 : w === "homing" ? 0.5 : 0.36;
+    const rifle = rifleId();
+    const lv = Math.max(1, state.levels[rifle]);
+    const interval = rifle === "mg" ? 0.1 / (1 + (lv - 1) * 0.12) : rifle === "multi" ? 0.42 : 0.36;
     fireCooldown -= dt;
-    if (fireCooldown <= 0 && enemies.length > 0) {
-      fireCooldown = interval;
-      fireAll();
+    extraCooldown -= dt;
+    launcherCooldown -= dt;
+    if (enemies.length > 0) {
+      if (fireCooldown <= 0) {
+        fireCooldown = interval;
+        fireMain();
+      }
+      if (extraCooldown <= 0 && cannons.length > 1) {
+        extraCooldown = 0.5;
+        fireExtras();
+      }
+      if (launcherCooldown <= 0 && state.levels.homing > 0) {
+        launcherCooldown = Math.max(0.32, 0.7 - state.levels.homing * 0.06);
+        fireLauncher();
+      }
     }
 
     for (let i = projectiles.length - 1; i >= 0; i -= 1) {
@@ -794,6 +881,8 @@ export function createDefenseMode(hooks: DefenseHooks) {
     zoom = 1;
     spawnTimer = 0.4;
     fireCooldown = 0.2;
+    extraCooldown = 0.25;
+    launcherCooldown = 0.4;
     waveTimer = 0;
     aimAngle = Math.PI / 2;
     aimPoint.set(0, 4.2, 0);
@@ -867,8 +956,18 @@ export function createDefenseMode(hooks: DefenseHooks) {
     }
     if (!type.startsWith("weapon-")) return false;
     const id = type.slice(7) as WeaponId;
-    if (!UNLOCK[id] && id !== "base") return false;
     if (!(id in state.levels)) return false;
+    if (id === "homing") {
+      const lv = state.levels.homing;
+      if (lv >= 5) return false;
+      const cost = lv <= 0 ? UNLOCK.homing : 55 * lv;
+      if (state.exp < cost) return false;
+      state.exp -= cost;
+      state.levels.homing = lv + 1;
+      syncCannons();
+      return true;
+    }
+    if (id !== "base" && id !== "mg" && id !== "multi") return false;
     const lv = state.levels[id];
     if (lv <= 0) {
       const cost = UNLOCK[id];

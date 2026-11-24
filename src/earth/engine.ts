@@ -760,7 +760,6 @@ export function mountEarth(
         controls.enabled = !surfaceLock;
         controls.update(dt);
         if (camera.position.length() < 1.012 && controls.target.length() < 0.5) camera.position.setLength(1.012);
-        borders.visible = flags.borders;
         labelsEl.style.visibility = "";
         earth.visible = true;
       }
