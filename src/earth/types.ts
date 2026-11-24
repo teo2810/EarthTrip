@@ -73,6 +73,12 @@ export type EarthApi = {
   focusSelection: () => void;
   clearSelection: () => void;
   dispose: () => void;
+  enterDefense: () => void;
+  exitDefense: () => void;
+  isDefenseActive: () => boolean;
+  getDefenseState: () => any;
+  buyDefenseUpgrade: (type: string) => boolean;
+  triggerLunarPulse: () => void;
 };
 
 export type Telemetry = {
@@ -90,4 +96,22 @@ export type Telemetry = {
   follow: boolean;
   view: "globe" | "moon" | "surface" | "iss";
   selection: Selection | null;
+};
+
+// Defense mode extensions
+export type DefenseApi = {
+  enterDefense: () => void;
+  exitDefense: () => void;
+  isDefenseActive: () => boolean;
+  getDefenseState: () => {
+    wave: number;
+    earthHP: number;
+    exp: number;
+    lunarEnergy: number;
+    highscore: number;
+    cannonCount: number;
+    weaponType: string;
+  };
+  buyDefenseUpgrade: (type: string) => boolean;
+  triggerLunarPulse: () => void;
 };

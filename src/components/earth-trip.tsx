@@ -45,6 +45,8 @@ export function EarthTrip() {
   const [mounted, setMounted] = useState(false);
   const [utc, setUtc] = useState("--:--:--");
   const [local, setLocal] = useState("--:--:--");
+  const [defenseActive, setDefenseActive] = useState(false);
+  const [defenseState, setDefenseState] = useState({ wave: 1, earthHP: 100, exp: 0, lunarEnergy: 0, highscore: 0, cannonCount: 1, weaponType: "base" });
 
   useEffect(() => {
     setMounted(true);
@@ -144,6 +146,23 @@ export function EarthTrip() {
         </div>
       </header>
 
+      {defenseActive ? (
+        <div className="et-defense-hud" style={{position:"absolute",bottom:"80px",left:"12px",right:"12px",background:"rgba(0,8,20,0.75)",border:"1px solid #2a3a6a",borderRadius:"10px",padding:"8px 12px",fontSize:"13px",pointerEvents:"auto",zIndex:20}}>
+          <div style={{display:"flex",gap:"12px",flexWrap:"wrap",alignItems:"center"}}>
+            <span>Onda {defenseState.wave}</span>
+            <span>HP {Math.round(defenseState.earthHP)}</span>
+            <span>EXP {defenseState.exp}</span>
+            <span>Luna {Math.round(defenseState.lunarEnergy)}%</span>
+            <button onClick={() => apiRef.current?.triggerLunarPulse()} disabled={defenseState.lunarEnergy < 100} style={{padding:"4px 8px",background:"#1a3a6a",border:"1px solid #6a9aff",borderRadius:"4px",color:"#d0e0ff"}}>🌕 Impulso</button>
+          </div>
+          <div style={{marginTop:"6px",display:"flex",gap:"6px",flexWrap:"wrap"}}>
+            <button onClick={() => { if (apiRef.current?.buyDefenseUpgrade("cannon")) setDefenseState(s => ({...s, exp: s.exp-150, cannonCount: s.cannonCount+1})); }} style={{fontSize:"11px",padding:"3px 6px"}}>+Cannone</button>
+            <button onClick={() => apiRef.current?.buyDefenseUpgrade("rate")} style={{fontSize:"11px",padding:"3px 6px"}}>Ricarica</button>
+            <button onClick={() => apiRef.current?.buyDefenseUpgrade("damage")} style={{fontSize:"11px",padding:"3px 6px"}}>Danno</button>
+            <button onClick={() => apiRef.current?.buyDefenseUpgrade("weapon-homing")} style={{fontSize:"11px",padding:"3px 6px"}}>Missili</button>
+          </div>
+        </div>
+      ) : null}
       {tel.surfaceLock ? (
         <div className="et-surface-bar">
           <p>Superficie · Esri, Maxar, Earthstar Geographics</p>

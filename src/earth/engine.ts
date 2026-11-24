@@ -1,3 +1,4 @@
+import { createDefenseMode } from "./defense-mode";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import {
@@ -691,6 +692,7 @@ export function mountEarth(
       const rawDt = (nowTick - lastTick) / 1000;
       lastTick = nowTick;
       const dt = Math.min(Math.max(rawDt, 0), 0.05);
+      if (defense.state.active) defense.update(dt);
       const animDt = Math.min(Math.max(rawDt, 0), 0.25);
       const date = simDate();
       updateSunMoon(date);
@@ -1545,6 +1547,12 @@ export function mountEarth(
       publish(true);
     },
     dispose,
+    enterDefense() { defense.enter(); },
+    exitDefense() { defense.exit(); },
+    isDefenseActive: () => defense.state.active,
+    getDefenseState: () => ({ ...defense.state }),
+    buyDefenseUpgrade: (type: string) => defense.buyUpgrade(type),
+    triggerLunarPulse: () => defense.lunarShockwave(),
   };
 }
 
