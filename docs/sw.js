@@ -2,7 +2,7 @@ const CACHE = "earthtrip-v4-single";
 const ASSETS = [
   "./",
   "./index.html",
-  "./app.js",
+  "./app-v4.js",
   "./style.css",
   "./favicon.svg",
   "./manifest.json"
