@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, Globe2, Map, Moon, Satellite, SlidersHorizontal, X } from "lucide-react";
+import { Globe2, Map, Moon, Satellite, SlidersHorizontal, X } from "lucide-react";
 import { DEFAULT_FLAGS, type EarthApi, type Flags, type Telemetry } from "@/earth/types";
 
 const EMPTY: Telemetry = {
@@ -272,12 +272,34 @@ export function EarthTrip() {
             <X />
           </button>
         </header>
+        <nav className="et-tabs" role="tablist" aria-label="Sezioni">
+          {(
+            [
+              ["visual", "Terra"],
+              ["sats", "Satelliti"],
+              ["moon", "Luna"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={section === id}
+              className={section === id ? "et-tab is-on" : "et-tab"}
+              onClick={() => setSection(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
         <Accordion title="Vista Terra" open={section === "visual"} onToggle={() => setSection((s) => (s === "visual" ? null : "visual"))}>
-          <Switch label="Confini" on={flags.borders} onClick={() => toggle("borders")} />
-          <Switch label="Capitali" on={flags.capitals} onClick={() => toggle("capitals")} />
-          <Switch label="Atmosfera" on={flags.atmosphere} onClick={() => toggle("atmosphere")} />
-          <Switch label="Nubi" on={flags.clouds} onClick={() => toggle("clouds")} />
-          <Switch label="Luci notturne" on={flags.nightLights} onClick={() => toggle("nightLights")} />
+          <div className="et-grid2">
+            <Switch label="Confini" on={flags.borders} onClick={() => toggle("borders")} />
+            <Switch label="Capitali" on={flags.capitals} onClick={() => toggle("capitals")} />
+            <Switch label="Atmosfera" on={flags.atmosphere} onClick={() => toggle("atmosphere")} />
+            <Switch label="Nubi" on={flags.clouds} onClick={() => toggle("clouds")} />
+            <Switch label="Luci notturne" on={flags.nightLights} onClick={() => toggle("nightLights")} />
+          </div>
           <label className="et-slider">
             <p>Offset temporale {hours > 0 ? `+${hours}` : hours} h</p>
             <input
@@ -298,31 +320,33 @@ export function EarthTrip() {
         </Accordion>
         <Accordion title="Satelliti" open={section === "sats"} onToggle={() => setSection((s) => (s === "sats" ? null : "sats"))}>
           <Switch label="Satelliti" on={flags.satellites} onClick={() => toggle("satellites")} />
-          <Band
-            label="LEO"
-            hint="Sotto 2.000 km"
-            on={flags.leo}
-            traces={flags.leoOrbits}
-            onToggle={() => toggle("leo")}
-            onTraces={() => toggle("leoOrbits")}
-          />
-          <Band
-            label="MEO"
-            hint="2.000 – 35.786 km"
-            on={flags.meo}
-            traces={flags.meoOrbits}
-            onToggle={() => toggle("meo")}
-            onTraces={() => toggle("meoOrbits")}
-          />
-          <Band
-            label="GEO / HEO"
-            hint="Oltre 35.786 km"
-            on={flags.geo}
-            traces={flags.geoOrbits}
-            onToggle={() => toggle("geo")}
-            onTraces={() => toggle("geoOrbits")}
-          />
-          <Switch label="Tutte le tracce della fascia" on={flags.allOrbits} onClick={() => toggle("allOrbits")} />
+          <div className={flags.satellites ? undefined : "et-dim"}>
+            <Band
+              label="LEO"
+              hint="Sotto 2.000 km"
+              on={flags.leo}
+              traces={flags.leoOrbits}
+              onToggle={() => toggle("leo")}
+              onTraces={() => toggle("leoOrbits")}
+            />
+            <Band
+              label="MEO"
+              hint="2.000 – 35.786 km"
+              on={flags.meo}
+              traces={flags.meoOrbits}
+              onToggle={() => toggle("meo")}
+              onTraces={() => toggle("meoOrbits")}
+            />
+            <Band
+              label="GEO / HEO"
+              hint="Oltre 35.786 km"
+              on={flags.geo}
+              traces={flags.geoOrbits}
+              onToggle={() => toggle("geo")}
+              onTraces={() => toggle("geoOrbits")}
+            />
+            <Switch label="Tutte le tracce della fascia" on={flags.allOrbits} onClick={() => toggle("allOrbits")} />
+          </div>
           <div className="et-legend">
             <span>
               <i className="crew" /> Equipaggio
@@ -353,25 +377,19 @@ export function EarthTrip() {
 }
 
 function Accordion({
-  title,
   open,
-  onToggle,
   children,
 }: {
-  title: string;
+  title?: string;
   open: boolean;
-  onToggle: () => void;
+  onToggle?: () => void;
   children: ReactNode;
 }) {
-  return (
-    <section className={open ? "et-acc is-open" : "et-acc"}>
-      <button type="button" className="et-acc-btn" aria-expanded={open} onClick={onToggle}>
-        <span>{title}</span>
-        <ChevronDown />
-      </button>
-      {open ? <div className="et-acc-body">{children}</div> : null}
+  return open ? (
+    <section className="et-acc-body" role="tabpanel">
+      {children}
     </section>
-  );
+  ) : null;
 }
 
 function Band({

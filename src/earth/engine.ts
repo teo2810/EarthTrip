@@ -190,6 +190,8 @@ export function mountEarth(
   let readySent = false;
   let publishAt = 0;
   let orbitAt = 0;
+  let orbitIdx = 0;
+  let frameNo = 0;
   let fps = 0;
   let frames = 0;
   let fpsStamp = performance.now();
@@ -260,32 +262,32 @@ export function mountEarth(
     `,
     fragmentShader: `
       precision highp float;
-      uniform sampler2D dayMap;
-      uniform sampler2D nightMap;
-      uniform sampler2D specMap;
-      uniform vec3 sunDir;
-      uniform float nightLights;
-      varying vec2 vUv;
-      varying vec3 vNormalW;
-      varying vec3 vPosW;
+      uniform sampler2D dayMap; uniform sampler2D nightMap; uniform sampler2D specMap;
+      uniform vec3 sunDir; uniform float nightLights;
+      varying vec2 vUv; varying vec3 vNormalW; varying vec3 vPosW;
       void main() {
-        vec3 n = normalize(vNormalW);
-        vec3 s = normalize(sunDir);
+        vec3 n = normalize(vNormalW), s = normalize(sunDir);
+        vec3 v = normalize(cameraPosition - vPosW);
         float ndl = dot(n, s);
-        vec3 viewDir = normalize(cameraPosition - vPosW);
         vec3 dayC = texture2D(dayMap, vUv).rgb;
         vec3 nightC = texture2D(nightMap, vUv).rgb;
-        float day = smoothstep(-0.012, 0.012, ndl);
-        float lambert = clamp(ndl, 0.0, 1.0);
-        vec3 lit = dayC * (0.94 + 0.18 * lambert);
-        float lumN = max(nightC.r, max(nightC.g, nightC.b));
-        float city = nightLights * smoothstep(0.025, 0.14, lumN) * (1.0 - day);
-        vec3 color = mix(nightC * city * 5.5, lit, day);
         float water = texture2D(specMap, vUv).r;
-        vec3 halfV = normalize(s + viewDir);
-        float spec = pow(max(dot(n, halfV), 0.0), 56.0) * water * day;
-        color += spec * vec3(0.82, 0.9, 1.0);
-        gl_FragColor = vec4(color, 1.0);
+
+        float lit = smoothstep(-0.03, 0.18, ndl);
+        float shade = pow(clamp(ndl, 0.0, 1.0), 0.4);
+        vec3 day = dayC * mix(0.28, 1.0, shade);
+        day = mix(vec3(dot(day, vec3(0.2126, 0.7152, 0.0722))), day, 1.15);
+
+        float dusk = smoothstep(-0.21, -0.03, ndl) * (1.0 - smoothstep(-0.03, 0.14, ndl));
+        vec3 twi = vec3(1.0, 0.45, 0.2) * dusk * 0.10;
+
+        float lumN = max(nightC.r, max(nightC.g, nightC.b));
+        float city = nightLights * smoothstep(0.025, 0.14, lumN) * (1.0 - smoothstep(-0.14, 0.0, ndl));
+
+        vec3 col = day * lit + twi + nightC * city * 2.6 * (1.0 - lit) + dayC * 0.015 * (1.0 - lit);
+        col += pow(max(dot(n, normalize(s + v)), 0.0), 64.0) * water * lit * vec3(0.8, 0.9, 1.0) * 0.6;
+        gl_FragColor = vec4(col, 1.0);
+        #include <colorspace_fragment>
       }
     `,
   });
@@ -335,8 +337,10 @@ export function mountEarth(
       void main() {
         float a = texture2D(map, vUv).r;
         float ndl = dot(normalize(vNormalW), normalize(sunDir));
-        float day = smoothstep(-0.012, 0.012, ndl);
-        gl_FragColor = vec4(vec3(0.97, 0.98, 1.0), a * opacity * day);
+        float lit = smoothstep(-0.03, 0.18, ndl);
+        float shade = mix(0.25, 1.0, pow(clamp(ndl, 0.0, 1.0), 0.4));
+        gl_FragColor = vec4(vec3(0.95, 0.97, 1.0) * shade, a * opacity * lit);
+        #include <colorspace_fragment>
       }
     `,
   });
@@ -378,7 +382,37 @@ export function mountEarth(
   scene.add(atmo);
 
   const moonPivot = new THREE.Group();
-  const moonMat = new THREE.MeshPhongMaterial({ color: 0x9a9a9a, shininess: 4 });
+  const moonMat = new THREE.ShaderMaterial({
+    uniforms: { map: { value: solidTexture(0x8a8a8a) }, sunDir: sunUniform },
+    vertexShader: `
+      varying vec2 vUv;
+      varying vec3 vN;
+      varying vec3 vP;
+      void main() {
+        vUv = uv;
+        vec4 w = modelMatrix * vec4(position, 1.0);
+        vP = w.xyz;
+        vN = normalize(mat3(modelMatrix) * normal);
+        gl_Position = projectionMatrix * viewMatrix * w;
+      }
+    `,
+    fragmentShader: `
+      precision highp float;
+      uniform sampler2D map;
+      uniform vec3 sunDir;
+      varying vec2 vUv;
+      varying vec3 vN;
+      varying vec3 vP;
+      void main() {
+        vec3 n = normalize(vN), s = normalize(sunDir), v = normalize(cameraPosition - vP);
+        float m0 = max(dot(n, s), 0.0), m = max(dot(n, v), 0.0);
+        float ls = m0 / (m0 + m + 0.02);
+        vec3 alb = texture2D(map, vUv).rgb;
+        gl_FragColor = vec4(alb * ls * 1.8 * smoothstep(0.0, 0.06, m0) + alb * 0.004, 1.0);
+        #include <colorspace_fragment>
+      }
+    `,
+  });
   const moonMesh = new THREE.Mesh(new THREE.SphereGeometry(MOON_R, 64, 48), moonMat);
   moonPivot.add(moonMesh);
   scene.add(moonPivot);
@@ -429,14 +463,12 @@ export function mountEarth(
   loadTex(TEX.water, false, (t) => {
     earthMat.uniforms.specMap!.value = t;
   });
-  loadTex(TEX.clouds, true, (t) => {
+  loadTex(TEX.clouds, false, (t) => {
     cloudMat.uniforms.map!.value = t;
-    cloudOpacity.value = 0.55;
+    cloudOpacity.value = 0.4;
   });
   loadTex(TEX.moon, true, (t) => {
-    moonMat.map = t;
-    moonMat.color.set(0xffffff);
-    moonMat.needsUpdate = true;
+    moonMat.uniforms.map!.value = t;
   });
 
   const dotGeo = new THREE.SphereGeometry(1, 10, 8);
@@ -550,6 +582,7 @@ export function mountEarth(
       sats.push(sat);
     }
     if (keepSelected != null && !sats.some((s) => s.raw.norad === keepSelected)) selectedNorad = null;
+    orbitIdx = 0;
     updateOrbits(simDate());
     orbitAt = performance.now();
   }
@@ -609,20 +642,28 @@ export function mountEarth(
     updateSunMoon(date);
     updateSatPositions(date);
     if (performance.now() - orbitAt > 2500) {
-      updateOrbits(date);
+      orbitIdx = 0;
       orbitAt = performance.now();
     }
+    updateOrbits(date, 4);
     stepCamera(animDt);
     applyLimits();
-    tuneControls();
+    tuneControls(dt);
     controls.enabled = !surfaceLock;
-    controls.update();
+    controls.update(dt);
     if (camera.position.length() < 1.012 && controls.target.length() < 0.5) camera.position.setLength(1.012);
-    clouds.rotation.y += dt * 0.012;
+    clouds.rotation.y += dt * 0.00005;
     updateScales();
     updateSurface();
     updateLabels();
-    updateGeoLabels();
+    if ((frameNo++ & 1) === 0) updateGeoLabels();
+    const dE = camera.position.length() - 1.02;
+    const dM = camera.position.distanceTo(moonPivot.position) - MOON_R * 1.02;
+    const nr = THREE.MathUtils.clamp(Math.min(dE, dM) * 0.4, 0.0005, 2);
+    if (Math.abs(nr - camera.near) / camera.near > 0.05) {
+      camera.near = nr;
+      camera.updateProjectionMatrix();
+    }
     renderer.render(scene, camera);
     countFps();
     if (!readySent) {
@@ -687,20 +728,20 @@ export function mountEarth(
     return flags.allOrbits || sat.featured;
   }
 
-  function updateOrbits(date: Date) {
+  function updateOrbits(date: Date, budget = Infinity) {
     const gmstNow = gstime(date);
-    for (const sat of sats) {
+    for (let done = 0; orbitIdx < sats.length && done < budget; orbitIdx += 1) {
+      const sat = sats[orbitIdx]!;
       if (!sat.line.visible) continue;
       const attr = sat.line.geometry.getAttribute("position") as THREE.BufferAttribute;
       const arr = attr.array as Float32Array;
       let last = sat.pos;
       for (let i = 0; i <= ORBIT_STEPS; i += 1) {
-        const when = new Date(date.getTime() + (i / ORBIT_STEPS) * sat.periodMin * 60_000);
-        const pv = safePropagate(sat.satrec, when);
+        const pv = safePropagate(sat.satrec, new Date(date.getTime() + (i / ORBIT_STEPS) * sat.periodMin * 60_000));
         let point = last;
         if (pv) {
-          const ecf = eciToEcf(pv.position, gmstNow);
-          point = ecfToThree(ecf.x, ecf.y, ecf.z);
+          const e = eciToEcf(pv.position, gmstNow);
+          point = ecfToThree(e.x, e.y, e.z);
           last = point;
         }
         arr[i * 3] = point.x;
@@ -708,6 +749,7 @@ export function mountEarth(
         arr[i * 3 + 2] = point.z;
       }
       attr.needsUpdate = true;
+      done += 1;
     }
   }
 
@@ -750,18 +792,19 @@ export function mountEarth(
     }
   }
 
-  function tuneControls() {
-    const dist = camera.position.distanceTo(controls.target);
-    const onMoon = controls.target.distanceTo(moonPivot.position) < 1.2 || mode === "moon";
-    const surface = onMoon ? MOON_R * 1.16 : 1.018;
-    const detail = onMoon ? MOON_R * 5.2 : 1.72;
-    const u = THREE.MathUtils.clamp((dist - surface) / Math.max(0.05, detail - surface), 0, 1);
-    const eased = Math.pow(u, 2.7);
-    controls.zoomSpeed = 0.02 + 0.8 * eased;
-    controls.rotateSpeed = 0.014 + 0.58 * eased;
-    controls.panSpeed = 0.02 + 0.28 * eased;
-    controls.dampingFactor = 0.88 - 0.76 * eased;
-    controls.autoRotateSpeed = reduce ? 0 : 0.015 + 0.2 * eased;
+  function tuneControls(dt: number) {
+    const tgt = controls.target;
+    const dist = camera.position.distanceTo(tgt);
+    const onMoon = tgt.distanceTo(moonPivot.position) < 1.2 || mode === "moon";
+    const onEarth = !onMoon && tgt.length() < 0.5;
+    const R = onMoon ? MOON_R : onEarth ? 1 : 0.02;
+    const alt = Math.max(dist - R * 1.018, 0.002);
+    const grab = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / Math.PI;
+    const u = THREE.MathUtils.clamp(alt / R / 0.75, 0, 1);
+    controls.rotateSpeed = onEarth || onMoon ? THREE.MathUtils.clamp((grab * alt) / R, 0.004, 0.8) : 0.3;
+    controls.zoomSpeed = THREE.MathUtils.clamp((0.85 * alt) / dist, 0.01, 0.85);
+    controls.dampingFactor = 1 - Math.exp(-dt * (80 - 70 * u * u));
+    controls.autoRotateSpeed = reduce ? 0 : 0.015 + 0.2 * u * u;
     controls.enablePan = false;
   }
 
@@ -814,7 +857,11 @@ export function mountEarth(
       mapPinned = false;
       mapEl.classList.remove("is-hot");
       const look = lookAtEarth();
-      map.setView([look.lat, look.lon], zoomFromAlt(altKm), { animate: false });
+      const z = Math.round(zoomFromAlt(altKm));
+      const c = map.getCenter();
+      if (Math.abs(c.lat - look.lat) > 2e-4 || Math.abs(c.lng - look.lon) > 2e-4 || map.getZoom() !== z) {
+        map.setView([look.lat, look.lon], z, { animate: false });
+      }
     }
   }
 

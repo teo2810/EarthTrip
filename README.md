@@ -9,3 +9,4 @@ Globo interattivo di Terra e Luna.
 - Zoom e rotazione che rallentano vicino alla superficie
 
 Interfaccia in italiano. I dati restano nel browser.
+La copia statica per GitHub Pages è in `docs/` (`index.html`, `style.css`, `app.js`), allineata al sorgente.

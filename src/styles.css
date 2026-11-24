@@ -719,3 +719,45 @@
     transition: none;
   }
 }
+
+.et-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.25rem;
+  margin: 0.2rem 0 0.6rem;
+  padding: 0.2rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+}
+
+.et-tab {
+  min-height: 2.5rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.et-tab.is-on {
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  color: var(--color-accent);
+}
+
+.et-grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 0.9rem;
+}
+
+.et-dim {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.et-sheet {
+  max-height: min(56dvh, 28rem);
+}
