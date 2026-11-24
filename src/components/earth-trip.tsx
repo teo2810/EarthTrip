@@ -63,6 +63,9 @@ export function EarthTrip() {
     veil: 0,
     over: false,
     zoom: 0.11,
+    shield: 0,
+    freezeLeft: 0,
+    boss: false,
   });
 
   useEffect(() => {
@@ -198,6 +201,7 @@ export function EarthTrip() {
           <DefenseHud state={defenseState} api={apiRef} />
         </>
       ) : null}
+      {defenseActive && (defenseState.freezeLeft ?? 0) > 0 ? <div className="et-def-freeze" /> : null}
       {defenseActive && defenseState.flash > 0.02 ? <div className="et-def-flash" style={{ opacity: defenseState.flash }} /> : null}
       {defenseActive && defenseState.veil > 0.02 ? <div className="et-def-veil" style={{ opacity: defenseState.veil }} /> : null}
       {gameOver ? (
@@ -552,6 +556,7 @@ type DefenseSlot = {
   selected: boolean;
   action?: "buy" | "upgrade" | "select" | "max";
   affordable?: boolean;
+  name?: string;
 };
 
 function IconSingle() {
@@ -606,12 +611,42 @@ function IconLunar() {
   );
 }
 
+function IconShield() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 3.5 18.5 6v5.2c0 3.6-2.4 6.4-6.5 8.3-4.1-1.9-6.5-4.7-6.5-8.3V6L12 3.5Z" fill="none" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  );
+}
+function IconFreeze() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 3v18M5.2 6.8l13.6 10.4M18.8 6.8 5.2 17.2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+function IconCluster() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="2.2" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="7" cy="8" r="1.3" fill="currentColor" />
+      <circle cx="17" cy="8.5" r="1.3" fill="currentColor" />
+      <circle cx="8" cy="16" r="1.3" fill="currentColor" />
+      <circle cx="16" cy="15.5" r="1.3" fill="currentColor" />
+    </svg>
+  );
+}
+
 const SLOT_ICON: Record<string, () => ReactNode> = {
-  base: IconSingle,
-  mg: IconBurst,
-  multi: IconFan,
+  fire: IconSingle,
+  rose: IconFan,
+  pod: IconTurret,
+  cluster: IconCluster,
+  limited: IconHoming,
+  slow: IconHoming,
   homing: IconHoming,
-  cannon: IconTurret,
+  shield: IconShield,
+  freeze: IconFreeze,
 };
 
 function ZoomRail({ value, onChange }: { value: number; onChange: (t: number) => void }) {
@@ -669,26 +704,37 @@ function DefenseHud({
     highscore: number;
     slots: DefenseSlot[];
     over?: boolean;
+    shield?: number;
+    freezeLeft?: number;
+    boss?: boolean;
   };
   api: { current: EarthApi | null };
 }) {
-  const ready = state.lunarEnergy >= 100;
+  const frozen = (state.freezeLeft ?? 0) > 0;
+  const ready = state.lunarEnergy >= 100 && !frozen;
   const slots = state.slots.length
     ? state.slots
     : [
-        { id: "base", level: 1, cost: 55, owned: true, selected: true, action: "upgrade", affordable: false },
-        { id: "mg", level: 0, cost: 90, owned: false, selected: false, action: "buy", affordable: false },
-        { id: "multi", level: 0, cost: 140, owned: false, selected: false, action: "buy", affordable: false },
-        { id: "homing", level: 0, cost: 200, owned: false, selected: false, action: "buy", affordable: false },
-        { id: "cannon", level: 1, cost: 70, owned: true, selected: false, action: "buy", affordable: false },
+        { id: "fire", level: 1, cost: 60, owned: true, selected: true, action: "upgrade" as const, affordable: false, name: "Singolo" },
+        { id: "rose", level: 1, cost: 80, owned: true, selected: false, action: "upgrade" as const, affordable: false, name: "x2" },
+        { id: "pod", level: 0, cost: 110, owned: false, selected: false, action: "buy" as const, affordable: false, name: "Lancio" },
+        { id: "cluster", level: 0, cost: 90, owned: false, selected: false, action: "buy" as const, affordable: false, name: "Grappolo" },
+        { id: "limited", level: 0, cost: 150, owned: false, selected: false, action: "buy" as const, affordable: false, name: "Limite" },
+        { id: "slow", level: 0, cost: 190, owned: false, selected: false, action: "buy" as const, affordable: false, name: "Rada" },
+        { id: "homing", level: 0, cost: 260, owned: false, selected: false, action: "buy" as const, affordable: false, name: "Ricerca" },
+        { id: "shield", level: 0, cost: 80, owned: false, selected: false, action: "buy" as const, affordable: false, name: "Scudo" },
+        { id: "freeze", level: 0, cost: 130, owned: false, selected: false, action: "buy" as const, affordable: false, name: "Gelo" },
       ];
   return (
-    <div className="et-def-hud">
+    <div className={frozen ? "et-def-hud is-frozen" : "et-def-hud"}>
       <div className="et-def-stats">
         <span>{`Onda ${state.wave}`}</span>
         <span className="et-def-hp"><i style={{ width: `${Math.max(0, Math.min(100, state.earthHP))}%` }} /></span>
         <span>HP {Math.round(state.earthHP)}</span>
         <span>EXP {Math.floor(state.exp)}</span>
+        {state.shield ? <span className="is-shield">Scudo {state.shield}</span> : null}
+        {frozen ? <span className="is-freeze">Gelo</span> : null}
+        {state.boss ? <span className="is-boss">Boss</span> : null}
         <span>Rec {state.highscore}</span>
       </div>
       <div className="et-def-row">
@@ -716,11 +762,12 @@ function DefenseHud({
             const action = slot.action ?? (slot.owned ? "select" : "buy");
             const affordable = slot.affordable ?? (slot.cost <= 0 || slot.cost <= state.exp);
             const poor = !affordable && action !== "max" && action !== "select";
+            const armed = action === "select" && slot.id === "freeze" && !frozen;
             const cls = [
               "et-def-slot",
               slot.selected ? "is-on" : "",
               action === "max" ? "is-max" : "",
-              affordable && (action === "buy" || action === "upgrade") ? "is-buy" : "",
+              (affordable && (action === "buy" || action === "upgrade")) || armed ? "is-buy" : "",
               poor ? "is-poor" : "",
             ]
               .filter(Boolean)
@@ -730,12 +777,13 @@ function DefenseHud({
                 key={slot.id}
                 type="button"
                 className={cls}
-                disabled={poor || action === "max"}
-                onClick={() => api.current?.buyDefenseUpgrade(slot.id === "cannon" ? "cannon" : `weapon-${slot.id}`)}
+                disabled={frozen || poor || action === "max"}
+                onClick={() => api.current?.buyDefenseUpgrade(slot.id)}
               >
                 <Icon />
+                <small>{slot.name ?? `Liv. ${slot.level}`}</small>
                 <small>Liv. {slot.level}</small>
-                {action === "max" ? <b>MAX</b> : action === "select" ? <b>USA</b> : (
+                {action === "max" ? <b>MAX</b> : action === "select" ? <b>{slot.id === "freeze" ? "ATTIVA" : "USA"}</b> : (
                   <>
                     <em>{slot.cost}</em>
                     <b>{action === "upgrade" ? "UPGRADE" : "ACQUISTA"}</b>
