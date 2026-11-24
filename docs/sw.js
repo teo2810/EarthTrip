@@ -1,16 +1,17 @@
-const CACHE = "earthtrip-v3-defense";
+const CACHE = "earthtrip-v4-single";
 const ASSETS = [
   "./",
   "./index.html",
   "./app.js",
   "./style.css",
   "./favicon.svg",
-  "./manifest.json",
-  "./assets/engine-7zE-QnxK.js"
+  "./manifest.json"
 ];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil(
+    caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener("activate", (e) => {
@@ -24,10 +25,15 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET") return;
   e.respondWith(
-    caches.match(e.request).then((r) => r || fetch(e.request).then((res) => {
-      const copy = res.clone();
-      caches.open(CACHE).then((c) => c.put(e.request, copy));
-      return res;
-    }))
+    caches.match(e.request).then((cached) => {
+      const fetched = fetch(e.request).then((res) => {
+        if (res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(e.request, copy));
+        }
+        return res;
+      }).catch(() => cached);
+      return cached || fetched;
+    })
   );
 });
