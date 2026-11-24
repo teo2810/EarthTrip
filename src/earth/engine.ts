@@ -177,6 +177,7 @@ export function mountEarth(
 
   const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const flags: Flags = { ...(initial?.flags ?? DEFAULT_FLAGS) };
+  let flagSnap: Flags | null = null;
   let timeOffsetH = initial?.timeOffsetHours ?? 0;
   let mode: Mode = "globe";
   let followNorad: number | null = null;
@@ -427,21 +428,36 @@ export function mountEarth(
   const defense = createDefenseMode({
     getEarth: () => earth,
     getMoon: () => moonMesh,
+    getMoonPivot: () => moonPivot,
     getCamera: () => camera,
     getScene: () => scene,
     getControls: () => controls,
     onExit: () => {},
-    setSimFlags: (f) => {
-      if (f.satellites !== undefined) flags.satellites = f.satellites;
-      if (f.orbits !== undefined) flags.orbits = f.orbits;
-      if (f.clouds !== undefined) flags.clouds = f.clouds;
-      if (f.borders !== undefined) flags.borders = f.borders;
-      if (f.capitals !== undefined) flags.capitals = f.capitals;
+    hideSim: () => {
+      flagSnap = { ...flags };
+      flags.satellites = false;
+      flags.orbits = false;
+      flags.clouds = false;
+      flags.borders = false;
+      flags.capitals = false;
+      flags.moonLabels = false;
+      flags.moonSites = false;
+      flags.astro = false;
+      borders.visible = false;
+      clouds.visible = false;
+      labelsEl.style.visibility = "hidden";
+    },
+    restoreSim: () => {
+      if (flagSnap) Object.assign(flags, flagSnap);
+      flagSnap = null;
+      borders.visible = flags.borders;
+      labelsEl.style.visibility = "";
     },
   });
 
   const onPointerMove = (e: PointerEvent | TouchEvent) => defense.onPointer(e);
   canvas.addEventListener("pointermove", onPointerMove);
+  canvas.addEventListener("pointerdown", onPointerMove);
   canvas.addEventListener("touchmove", onPointerMove, { passive: true });
   moonMesh.scale.set(1, 1, 1);
   moonPivot.add(moonMesh);
@@ -688,6 +704,10 @@ export function mountEarth(
     downY = e.clientY;
   };
   const onUp = (e: PointerEvent) => {
+    if (defense.holdsCamera()) {
+      defense.onPointerUp(e);
+      return;
+    }
     if (surfaceLock) return;
     if (Math.hypot(e.clientX - downX, e.clientY - downY) > 7) return;
     pick(e);
@@ -712,7 +732,6 @@ export function mountEarth(
       const rawDt = (nowTick - lastTick) / 1000;
       lastTick = nowTick;
       const dt = Math.min(Math.max(rawDt, 0), 0.05);
-      if (defense.state.active) defense.update(dt);
       const animDt = Math.min(Math.max(rawDt, 0), 0.25);
       const date = simDate();
       updateSunMoon(date);
@@ -723,12 +742,25 @@ export function mountEarth(
         orbitAt = performance.now();
       }
       updateOrbits(date, 16);
-      stepCamera(animDt);
-      applyLimits();
-      tuneControls(dt);
-      controls.enabled = !surfaceLock;
-      controls.update(dt);
-      if (camera.position.length() < 1.012 && controls.target.length() < 0.5) camera.position.setLength(1.012);
+      if (defense.holdsCamera()) {
+        defense.update(dt);
+        controls.enabled = false;
+        borders.visible = false;
+        clouds.visible = false;
+        labelsEl.style.visibility = "hidden";
+        moonLimb.visible = false;
+        astroEarth.visible = false;
+        astroMoon.visible = false;
+      } else {
+        stepCamera(animDt);
+        applyLimits();
+        tuneControls(dt);
+        controls.enabled = !surfaceLock;
+        controls.update(dt);
+        if (camera.position.length() < 1.012 && controls.target.length() < 0.5) camera.position.setLength(1.012);
+        borders.visible = flags.borders;
+        labelsEl.style.visibility = "";
+      }
       clouds.rotation.y += dt * 0.00005;
       updateScales();
       updateAstro();
@@ -1570,7 +1602,7 @@ export function mountEarth(
     enterDefense() { defense.enter(); },
     exitDefense() { defense.exit(); },
     isDefenseActive: () => defense.state.active,
-    getDefenseState: () => ({ ...defense.state }),
+    getDefenseState: () => defense.snapshot(),
     buyDefenseUpgrade: (type: string) => defense.buyUpgrade(type),
     triggerLunarPulse: () => defense.lunarShockwave(),
   };

@@ -46,7 +46,18 @@ export function EarthTrip() {
   const [utc, setUtc] = useState("--:--:--");
   const [local, setLocal] = useState("--:--:--");
   const [defenseActive, setDefenseActive] = useState(false);
-  const [defenseState, setDefenseState] = useState({ wave: 1, earthHP: 100, exp: 0, lunarEnergy: 0, highscore: 0, cannonCount: 1, weaponType: "base" });
+  const [defenseState, setDefenseState] = useState({
+    wave: 1,
+    earthHP: 100,
+    exp: 0,
+    score: 0,
+    lunarEnergy: 0,
+    highscore: 0,
+    cannonCount: 1,
+    weaponType: "base" as "base" | "mg" | "multi" | "homing",
+    levels: { base: 1, mg: 0, multi: 0, homing: 0 },
+    slots: [] as { id: string; level: number; cost: number; owned: boolean; selected: boolean }[],
+  });
 
   useEffect(() => {
     if (!defenseActive) return;
@@ -127,7 +138,7 @@ export function EarthTrip() {
   const sel = tel.selection;
 
   return (
-    <main className="et-root">
+    <main className={defenseActive ? "et-root is-defense" : "et-root"}>
       <div ref={stageRef} className="et-stage" />
       {!ready && !error ? <div className="et-boot">Sincronizzazione effemeridi</div> : null}
       {error ? (
@@ -156,9 +167,7 @@ export function EarthTrip() {
         </div>
       </header>
 
-            <button
-        type="button"
-        onClick={() => {
+      <button type="button" className={defenseActive ? "et-def-toggle is-on" : "et-def-toggle"} onClick={() => {
           if (defenseActive) {
             apiRef.current?.exitDefense();
             setDefenseActive(false);
@@ -166,42 +175,11 @@ export function EarthTrip() {
             apiRef.current?.enterDefense();
             setDefenseActive(true);
           }
-        }}
-        style={{
-          position: "fixed",
-          top: "12px",
-          right: "12px",
-          zIndex: 50,
-          padding: "8px 14px",
-          background: defenseActive ? "#1a3a6a" : "#0a1a2a",
-          border: "1px solid #3ee0a0",
-          borderRadius: "8px",
-          color: "#e7eef6",
-          fontSize: "14px",
-          fontWeight: 600,
-          cursor: "pointer",
-          pointerEvents: "auto",
-        }}
-      >
-        🎮 {defenseActive ? "Esci" : "Difendi la Terra"}
+        }}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.6"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="currentColor" strokeWidth="1.6"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/></svg>
+        {defenseActive ? "Esci" : "Difendi la Terra"}
       </button>
-      {defenseActive ? (
-        <div className="et-defense-hud" style={{position:"absolute",bottom:"80px",left:"12px",right:"12px",background:"rgba(0,8,20,0.75)",border:"1px solid #2a3a6a",borderRadius:"10px",padding:"8px 12px",fontSize:"13px",pointerEvents:"auto",zIndex:20}}>
-          <div style={{display:"flex",gap:"12px",flexWrap:"wrap",alignItems:"center"}}>
-            <span>Onda {defenseState.wave}</span>
-            <span>HP {Math.round(defenseState.earthHP)}</span>
-            <span>EXP {defenseState.exp}</span>
-            <span>Luna {Math.round(defenseState.lunarEnergy)}%</span>
-            <button onClick={() => apiRef.current?.triggerLunarPulse()} disabled={defenseState.lunarEnergy < 100} style={{padding:"4px 8px",background:"#1a3a6a",border:"1px solid #6a9aff",borderRadius:"4px",color:"#d0e0ff"}}>🌕 Impulso</button>
-          </div>
-          <div style={{marginTop:"6px",display:"flex",gap:"6px",flexWrap:"wrap"}}>
-            <button onClick={() => { if (apiRef.current?.buyDefenseUpgrade("cannon")) setDefenseState(s => ({...s, exp: s.exp-150, cannonCount: s.cannonCount+1})); }} style={{fontSize:"11px",padding:"3px 6px"}}>+Cannone</button>
-            <button onClick={() => apiRef.current?.buyDefenseUpgrade("rate")} style={{fontSize:"11px",padding:"3px 6px"}}>Ricarica</button>
-            <button onClick={() => apiRef.current?.buyDefenseUpgrade("damage")} style={{fontSize:"11px",padding:"3px 6px"}}>Danno</button>
-            <button onClick={() => apiRef.current?.buyDefenseUpgrade("weapon-homing")} style={{fontSize:"11px",padding:"3px 6px"}}>Missili</button>
-          </div>
-        </div>
-      ) : null}
+      {defenseActive ? <DefenseHud state={defenseState} api={apiRef} /> : null}
       {tel.surfaceLock ? (
         <div className="et-surface-bar">
           <p>Superficie · Esri, Maxar, Earthstar Geographics</p>
@@ -516,4 +494,140 @@ function fmtLon(lon: number) {
   if (x > 180) x -= 360;
   if (x < -180) x += 360;
   return `${Math.abs(x).toFixed(1)}°${x >= 0 ? "E" : "W"}`;
+}
+
+type DefenseSlot = { id: string; level: number; cost: number; owned: boolean; selected: boolean };
+
+function IconSingle() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 19 V7" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M8.5 10.5 12 6l3.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function IconBurst() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M7 18V11M12 18V8M17 18V11" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M7 11 7 8M12 8V5M17 11V8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+function IconFan() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 19 12 12" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M12 12 6.5 6M12 12 12 5.5M12 12 17.5 6" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+function IconHoming() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 18c2.4-2.2 3.6-4.1 3.6-6.1A3.6 3.6 0 0 0 12 8.3 3.6 3.6 0 0 0 8.4 11.9c0 2 1.2 3.9 3.6 6.1Z" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M4.5 9.5a8 8 0 0 1 15 0" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M7 7.2a5.2 5.2 0 0 1 10 0" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+function IconTurret() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="5" y="13" width="10" height="5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M13 15.5h5.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M16 6v3M16 4.2h.01" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M16 3v1.2M14.2 6.2h3.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+function IconLunar() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="3.1" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.2 5.2l1.6 1.6M17.2 17.2l1.6 1.6M18.8 5.2l-1.6 1.6M6.8 17.2l-1.6 1.6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+const SLOT_ICON: Record<string, () => ReactNode> = {
+  base: IconSingle,
+  mg: IconBurst,
+  multi: IconFan,
+  homing: IconHoming,
+  cannon: IconTurret,
+};
+
+function DefenseHud({
+  state,
+  api,
+}: {
+  state: {
+    wave: number;
+    earthHP: number;
+    exp: number;
+    lunarEnergy: number;
+    highscore: number;
+    slots: DefenseSlot[];
+  };
+  api: { current: EarthApi | null };
+}) {
+  const ready = state.lunarEnergy >= 100;
+  const slots = state.slots.length
+    ? state.slots
+    : [
+        { id: "base", level: 1, cost: 0, owned: true, selected: true },
+        { id: "mg", level: 0, cost: 90, owned: false, selected: false },
+        { id: "multi", level: 0, cost: 140, owned: false, selected: false },
+        { id: "homing", level: 0, cost: 200, owned: false, selected: false },
+        { id: "cannon", level: 1, cost: 70, owned: true, selected: false },
+      ];
+  return (
+    <div className="et-def-hud">
+      <div className="et-def-stats">
+        <span>Onda {state.wave}</span>
+        <span className="et-def-hp"><i style={{ width: `${Math.max(0, Math.min(100, state.earthHP))}%` }} /></span>
+        <span>HP {Math.round(state.earthHP)}</span>
+        <span>EXP {Math.floor(state.exp)}</span>
+        <span>Rec {state.highscore}</span>
+      </div>
+      <div className="et-def-row">
+        <button
+          type="button"
+          className={ready ? "et-lunar is-ready" : "et-lunar"}
+          aria-label="Impulso lunare"
+          disabled={!ready}
+          onClick={() => api.current?.triggerLunarPulse()}
+        >
+          <svg className="et-lunar-ring" viewBox="0 0 36 36" aria-hidden="true">
+            <circle cx="18" cy="18" r="15.5" />
+            <circle
+              cx="18"
+              cy="18"
+              r="15.5"
+              style={{ strokeDasharray: `${(Math.max(0, Math.min(100, state.lunarEnergy)) / 100) * 97.4} 97.4` }}
+            />
+          </svg>
+          <IconLunar />
+        </button>
+        <div className="et-def-slots">
+          {slots.map((slot) => {
+            const Icon = SLOT_ICON[slot.id] ?? IconSingle;
+            const label = !slot.owned ? `${slot.cost}` : slot.cost > 0 && slot.selected ? `Lv${slot.level} · ${slot.cost}` : `Lv${slot.level}`;
+            return (
+              <button
+                key={slot.id}
+                type="button"
+                className={slot.selected ? "et-def-slot is-on" : slot.owned ? "et-def-slot" : "et-def-slot is-locked"}
+                onClick={() => api.current?.buyDefenseUpgrade(slot.id === "cannon" ? "cannon" : `weapon-${slot.id}`)}
+              >
+                <Icon />
+                <small>{label}</small>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
 }

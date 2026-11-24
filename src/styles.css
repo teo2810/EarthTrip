@@ -776,3 +776,191 @@
 .et-sheet {
   max-height: min(56dvh, 28rem);
 }
+
+.et-root.is-defense .et-dock,
+.et-root.is-defense .et-meta,
+.et-root.is-defense .et-card,
+.et-root.is-defense .et-sheet,
+.et-root.is-defense .et-surface-bar {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.et-def-toggle {
+  position: absolute;
+  top: calc(3.35rem + env(safe-area-inset-top));
+  right: 0.85rem;
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.5rem;
+  padding: 0 0.8rem;
+  border: 1px solid var(--color-accent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-bg) 78%, transparent);
+  color: var(--color-fg);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  pointer-events: auto;
+  backdrop-filter: blur(12px);
+}
+
+.et-def-toggle svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.et-def-toggle.is-on {
+  background: color-mix(in srgb, var(--color-accent) 22%, var(--color-bg));
+  color: var(--color-accent);
+}
+
+.et-def-hud {
+  position: absolute;
+  left: 0.6rem;
+  right: 0.6rem;
+  bottom: calc(0.55rem + env(safe-area-inset-bottom));
+  z-index: 24;
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.45rem 0.5rem 0.5rem;
+  border: 1px solid var(--color-line);
+  border-radius: 0.9rem;
+  background: color-mix(in srgb, var(--color-bg) 82%, transparent);
+  backdrop-filter: blur(16px);
+  pointer-events: auto;
+}
+
+.et-def-stats {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.et-def-hp {
+  flex: 1;
+  height: 0.28rem;
+  border-radius: 999px;
+  background: #1c2836;
+  overflow: hidden;
+}
+
+.et-def-hp i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #ff5d73, #3ee0a0);
+}
+
+.et-def-row {
+  display: grid;
+  grid-template-columns: 4.4rem 1fr;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.et-lunar {
+  position: relative;
+  width: 4.1rem;
+  height: 4.1rem;
+  margin: 0 auto;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #9eb0c8;
+  display: grid;
+  place-items: center;
+}
+
+.et-lunar > svg:last-child {
+  width: 1.7rem;
+  height: 1.7rem;
+}
+
+.et-lunar-ring {
+  position: absolute;
+  inset: 0;
+  transform: rotate(-90deg);
+}
+
+.et-lunar-ring circle {
+  fill: none;
+  stroke: #243041;
+  stroke-width: 2.2;
+}
+
+.et-lunar-ring circle:last-child {
+  stroke: #8eb6ff;
+  stroke-linecap: round;
+  stroke-dashoffset: 0;
+}
+
+.et-lunar.is-ready {
+  color: #fff3c4;
+  animation: et-lunar-pulse 0.9s ease-in-out infinite;
+}
+
+.et-lunar.is-ready .et-lunar-ring circle:last-child {
+  stroke: #ffe29a;
+}
+
+.et-lunar:disabled {
+  cursor: default;
+}
+
+@keyframes et-lunar-pulse {
+  50% { filter: drop-shadow(0 0 8px #ffe29a); transform: scale(1.06); }
+}
+
+.et-def-slots {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.3rem;
+}
+
+.et-def-slot {
+  min-height: 3.35rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  padding: 0.2rem 0.1rem;
+  border: 1px solid var(--color-line);
+  border-radius: 0.65rem;
+  background: transparent;
+  color: var(--color-fg);
+}
+
+.et-def-slot svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.et-def-slot small {
+  font-family: var(--font-mono);
+  font-size: 0.56rem;
+  letter-spacing: 0.02em;
+  color: var(--color-muted);
+}
+
+.et-def-slot.is-on {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.et-def-slot.is-locked {
+  opacity: 0.55;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .et-lunar.is-ready { animation: none; }
+}
+

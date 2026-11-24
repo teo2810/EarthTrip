@@ -1,8 +1,8 @@
-const CACHE = "earthtrip-v4-single";
+const CACHE = "earthtrip-v8-defense";
 const ASSETS = [
   "./",
   "./index.html",
-  "./app-v7.js",
+  "./app-v8.js",
   "./style.css",
   "./favicon.svg",
   "./manifest.json"
