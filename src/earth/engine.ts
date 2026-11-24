@@ -423,6 +423,19 @@ export function mountEarth(
     `,
   });
   const moonMesh = new THREE.Mesh(new THREE.SphereGeometry(MOON_R, 64, 64), moonMat);
+
+  const defense = createDefenseMode({
+    getEarth: () => earth,
+    getMoon: () => moonMesh,
+    getCamera: () => camera,
+    getScene: () => scene,
+    getControls: () => controls,
+    onExit: () => {},
+  });
+
+  const onPointerMove = (e: PointerEvent | TouchEvent) => defense.onPointer(e);
+  canvas.addEventListener("pointermove", onPointerMove);
+  canvas.addEventListener("touchmove", onPointerMove, { passive: true });
   moonMesh.scale.set(1, 1, 1);
   moonPivot.add(moonMesh);
   const limbPts: THREE.Vector3[] = [];
