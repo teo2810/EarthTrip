@@ -49,6 +49,16 @@ export function EarthTrip() {
   const [defenseState, setDefenseState] = useState({ wave: 1, earthHP: 100, exp: 0, lunarEnergy: 0, highscore: 0, cannonCount: 1, weaponType: "base" });
 
   useEffect(() => {
+    if (!defenseActive) return;
+    const id = setInterval(() => {
+      const s = apiRef.current?.getDefenseState?.();
+      if (s) setDefenseState(s);
+    }, 200);
+    return () => clearInterval(id);
+  }, [defenseActive]);
+
+
+  useEffect(() => {
     setMounted(true);
   }, []);
 
@@ -146,6 +156,35 @@ export function EarthTrip() {
         </div>
       </header>
 
+            <button
+        type="button"
+        onClick={() => {
+          if (defenseActive) {
+            apiRef.current?.exitDefense();
+            setDefenseActive(false);
+          } else {
+            apiRef.current?.enterDefense();
+            setDefenseActive(true);
+          }
+        }}
+        style={{
+          position: "fixed",
+          top: "12px",
+          right: "12px",
+          zIndex: 50,
+          padding: "8px 14px",
+          background: defenseActive ? "#1a3a6a" : "#0a1a2a",
+          border: "1px solid #3ee0a0",
+          borderRadius: "8px",
+          color: "#e7eef6",
+          fontSize: "14px",
+          fontWeight: 600,
+          cursor: "pointer",
+          pointerEvents: "auto",
+        }}
+      >
+        🎮 {defenseActive ? "Esci" : "Difendi la Terra"}
+      </button>
       {defenseActive ? (
         <div className="et-defense-hud" style={{position:"absolute",bottom:"80px",left:"12px",right:"12px",background:"rgba(0,8,20,0.75)",border:"1px solid #2a3a6a",borderRadius:"10px",padding:"8px 12px",fontSize:"13px",pointerEvents:"auto",zIndex:20}}>
           <div style={{display:"flex",gap:"12px",flexWrap:"wrap",alignItems:"center"}}>
@@ -287,21 +326,7 @@ export function EarthTrip() {
           <SlidersHorizontal />
           Pannello
         </button>
-        <button
-          type="button"
-          className={defenseActive ? "et-btn is-on" : "et-btn"}
-          onClick={() => {
-            if (defenseActive) {
-              apiRef.current?.exitDefense();
-              setDefenseActive(false);
-            } else {
-              apiRef.current?.enterDefense();
-              setDefenseActive(true);
-            }
-          }}
-        >
-          🎮 {defenseActive ? "Esci" : "Difendi"}
-        </button>
+
       </nav>
 
       <aside className={panel ? "et-sheet is-open" : "et-sheet"} aria-label="Controlli">

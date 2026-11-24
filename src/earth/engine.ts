@@ -431,6 +431,13 @@ export function mountEarth(
     getScene: () => scene,
     getControls: () => controls,
     onExit: () => {},
+    setSimFlags: (f) => {
+      if (f.satellites !== undefined) flags.satellites = f.satellites;
+      if (f.orbits !== undefined) flags.orbits = f.orbits;
+      if (f.clouds !== undefined) flags.clouds = f.clouds;
+      if (f.borders !== undefined) flags.borders = f.borders;
+      if (f.capitals !== undefined) flags.capitals = f.capitals;
+    },
   });
 
   const onPointerMove = (e: PointerEvent | TouchEvent) => defense.onPointer(e);
