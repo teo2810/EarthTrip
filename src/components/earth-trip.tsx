@@ -46,6 +46,7 @@ export function EarthTrip() {
   const [utc, setUtc] = useState("--:--:--");
   const [local, setLocal] = useState("--:--:--");
   const [defenseActive, setDefenseActive] = useState(false);
+  const [gameOver, setGameOver] = useState<{ score: number; wave: number; highscore: number } | null>(null);
   const [defenseState, setDefenseState] = useState({
     wave: 1,
     earthHP: 100,
@@ -57,14 +58,23 @@ export function EarthTrip() {
     weaponType: "base" as "base" | "mg" | "multi" | "homing",
     levels: { base: 1, mg: 0, multi: 0, homing: 0 },
     slots: [] as { id: string; level: number; cost: number; owned: boolean; selected: boolean }[],
+    phase: "play",
+    flash: 0,
+    veil: 0,
+    over: false,
   });
 
   useEffect(() => {
     if (!defenseActive) return;
     const id = setInterval(() => {
       const s = apiRef.current?.getDefenseState?.();
-      if (s) setDefenseState(s);
-    }, 200);
+      if (!s) return;
+      setDefenseState(s);
+      if (s.phase === "idle") {
+        if (s.finale) setGameOver(s.finale);
+        setDefenseActive(false);
+      }
+    }, 80);
     return () => clearInterval(id);
   }, [defenseActive]);
 
@@ -171,7 +181,9 @@ export function EarthTrip() {
           if (defenseActive) {
             apiRef.current?.exitDefense();
             setDefenseActive(false);
+            setGameOver(null);
           } else {
+            setGameOver(null);
             apiRef.current?.enterDefense();
             setDefenseActive(true);
           }
@@ -179,7 +191,37 @@ export function EarthTrip() {
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.6"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="currentColor" strokeWidth="1.6"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/></svg>
         {defenseActive ? "Esci" : "Difendi la Terra"}
       </button>
-      {defenseActive ? <DefenseHud state={defenseState} api={apiRef} /> : null}
+      {defenseActive && defenseState.phase !== "boom" && defenseState.phase !== "exit" ? <DefenseHud state={defenseState} api={apiRef} /> : null}
+      {defenseActive && defenseState.flash > 0.02 ? <div className="et-def-flash" style={{ opacity: defenseState.flash }} /> : null}
+      {defenseActive && defenseState.veil > 0.02 ? <div className="et-def-veil" style={{ opacity: defenseState.veil }} /> : null}
+      {gameOver ? (
+        <div className="et-over" role="dialog" aria-label="Game over">
+          <div className="et-over-card">
+            <p>Game over</p>
+            <h2>Terra perduta</h2>
+            <ul>
+              <li>Punteggio <strong>{gameOver.score}</strong></li>
+              <li>Onda <strong>{gameOver.wave}</strong></li>
+              <li>Record <strong>{gameOver.highscore}</strong></li>
+            </ul>
+            <div className="et-over-actions">
+              <button
+                type="button"
+                onClick={() => {
+                  setGameOver(null);
+                  apiRef.current?.enterDefense();
+                  setDefenseActive(true);
+                }}
+              >
+                Riprova
+              </button>
+              <button type="button" onClick={() => setGameOver(null)}>
+                Chiudi
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {tel.surfaceLock ? (
         <div className="et-surface-bar">
           <p>Superficie · Esri, Maxar, Earthstar Geographics</p>
@@ -586,16 +628,11 @@ function DefenseHud({
   return (
     <div className="et-def-hud">
       <div className="et-def-stats">
-        <span>{state.over ? "Terra colpita" : `Onda ${state.wave}`}</span>
+        <span>{`Onda ${state.wave}`}</span>
         <span className="et-def-hp"><i style={{ width: `${Math.max(0, Math.min(100, state.earthHP))}%` }} /></span>
         <span>HP {Math.round(state.earthHP)}</span>
         <span>EXP {Math.floor(state.exp)}</span>
         <span>Rec {state.highscore}</span>
-        {state.over ? (
-          <button type="button" className="et-def-retry" onClick={() => api.current?.retryDefense()}>
-            Riprova
-          </button>
-        ) : null}
       </div>
       <div className="et-def-row">
         <button

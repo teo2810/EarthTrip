@@ -456,9 +456,15 @@ export function mountEarth(
   });
 
   const onPointerMove = (e: PointerEvent | TouchEvent) => defense.onPointer(e);
+  const onWheel = (e: WheelEvent) => {
+    if (!defense.holdsCamera()) return;
+    e.preventDefault();
+    defense.onWheel(e.deltaY);
+  };
   canvas.addEventListener("pointermove", onPointerMove);
   canvas.addEventListener("pointerdown", onPointerMove);
   canvas.addEventListener("touchmove", onPointerMove, { passive: true });
+  canvas.addEventListener("wheel", onWheel, { passive: false });
   moonMesh.scale.set(1, 1, 1);
   moonPivot.add(moonMesh);
   const limbPts: THREE.Vector3[] = [];
@@ -751,6 +757,8 @@ export function mountEarth(
         moonLimb.visible = false;
         astroEarth.visible = false;
         astroMoon.visible = false;
+        earth.visible = !defense.hidesPlanet();
+        if (defense.hidesPlanet()) atmo.visible = false;
       } else {
         stepCamera(animDt);
         applyLimits();
@@ -760,6 +768,7 @@ export function mountEarth(
         if (camera.position.length() < 1.012 && controls.target.length() < 0.5) camera.position.setLength(1.012);
         borders.visible = flags.borders;
         labelsEl.style.visibility = "";
+        earth.visible = true;
       }
       clouds.rotation.y += dt * 0.00005;
       updateScales();
@@ -1534,6 +1543,10 @@ export function mountEarth(
     ro.disconnect();
     canvas.removeEventListener("pointerdown", onDown);
     canvas.removeEventListener("pointerup", onUp);
+    canvas.removeEventListener("pointermove", onPointerMove);
+    canvas.removeEventListener("pointerdown", onPointerMove);
+    canvas.removeEventListener("touchmove", onPointerMove);
+    canvas.removeEventListener("wheel", onWheel);
     controls.dispose();
     map?.remove();
     clearSats();

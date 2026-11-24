@@ -31,9 +31,12 @@ export type DefenseState = {
 type Enemy = { mesh: THREE.Mesh; speed: number; hp: number };
 type Shot = { mesh: THREE.Mesh; vel: THREE.Vector3; life: number; homing: boolean; damage: number };
 type Spark = { mesh: THREE.Mesh; vel: THREE.Vector3; life: number };
+type Shard = { mesh: THREE.Mesh; vel: THREE.Vector3; spin: THREE.Vector3 };
 
 const RIM = 1.1;
 const MOON_ORBIT = 2.48;
+const ZOOM_MIN = 0.62;
+const ZOOM_MAX = 4.1;
 const UNLOCK: Record<WeaponId, number> = { base: 0, mg: 90, multi: 140, homing: 200 };
 
 export function createDefenseMode(hooks: DefenseHooks) {
@@ -72,15 +75,29 @@ export function createDefenseMode(hooks: DefenseHooks) {
   let fireCooldown = 0;
   let waveTimer = 0;
   let camT = 1;
-  let phase: "idle" | "enter" | "play" | "exit" = "idle";
+  let phase: "idle" | "enter" | "play" | "exit" | "boom" = "idle";
   let moonRing: THREE.Mesh | null = null;
   let moonArc: THREE.Mesh | null = null;
   let aimLine: THREE.Line | null = null;
   let cross: THREE.Group | null = null;
   let arcProgress = -1;
+  let zoom = 1;
+  let pinchDist = 0;
+  let boomT = 0;
+  let flash = 0;
+  let veil = 0;
+  let pendingFinale = false;
+  let finale: { score: number; wave: number; highscore: number } | null = null;
+  const shards: Shard[] = [];
+  let boomRing: THREE.Mesh | null = null;
+  let boomCore: THREE.Mesh | null = null;
 
   function holdsCamera() {
     return phase !== "idle";
+  }
+
+  function hidesPlanet() {
+    return phase === "boom" || (phase === "exit" && veil > 0.28);
   }
 
   function frameDistance(cam: THREE.PerspectiveCamera) {
@@ -88,6 +105,23 @@ export function createDefenseMode(hooks: DefenseHooks) {
     const h = Math.atan(Math.tan(v) * Math.max(0.35, cam.aspect));
     const limit = Math.min(Math.tan(v), Math.tan(h));
     return THREE.MathUtils.clamp((MOON_ORBIT + 0.85) / Math.max(0.16, limit), 6.2, 22);
+  }
+
+  function viewZ(cam: THREE.PerspectiveCamera) {
+    return THREE.MathUtils.clamp(frameDistance(cam) * zoom, 5.2, 120);
+  }
+
+  function horizon() {
+    const cam = hooks.getCamera() as THREE.PerspectiveCamera;
+    const v = THREE.MathUtils.degToRad(cam.fov) * 0.5;
+    const limit = Math.min(Math.tan(v), Math.tan(v) * Math.max(0.35, cam.aspect));
+    return Math.max(6.6, viewZ(cam) * limit * 0.9);
+  }
+
+  function onWheel(deltaY: number) {
+    if (phase === "idle" || phase === "exit" || phase === "boom") return;
+    const dy = THREE.MathUtils.clamp(deltaY, -180, 180);
+    zoom = THREE.MathUtils.clamp(zoom * Math.exp(dy * 0.00145), ZOOM_MIN, ZOOM_MAX);
   }
 
   function slotCost(id: WeaponId | "cannon") {
@@ -103,6 +137,10 @@ export function createDefenseMode(hooks: DefenseHooks) {
     return {
       ...state,
       levels: { ...state.levels },
+      phase,
+      flash,
+      veil,
+      finale,
       slots: ids.map((id) => ({
         id,
         level: id === "cannon" ? state.cannonCount : state.levels[id],
@@ -284,7 +322,8 @@ export function createDefenseMode(hooks: DefenseHooks) {
 
   function spawnEnemy() {
     const angle = Math.random() * Math.PI * 2;
-    const dist = 7.2 + Math.random() * 2.4;
+    const edge = horizon();
+    const dist = Math.max(5.4, edge * (0.78 + Math.random() * 0.16));
     const mesh = new THREE.Mesh(
       new THREE.OctahedronGeometry(0.16, 0),
       new THREE.MeshStandardMaterial({
@@ -311,7 +350,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
     projectiles.push({
       mesh,
       vel: new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0).multiplyScalar(speed),
-      life: 2.4,
+      life: Math.max(2.6, horizon() / Math.max(3.2, speed * 0.72)),
       homing,
       damage,
     });
@@ -354,6 +393,130 @@ export function createDefenseMode(hooks: DefenseHooks) {
     moonRing = null;
     moonArc = null;
     arcProgress = -1;
+  }
+
+  function clearBoom() {
+    const scene = hooks.getScene();
+    for (const shard of shards) {
+      scene.remove(shard.mesh);
+      shard.mesh.geometry.dispose();
+      (shard.mesh.material as THREE.Material).dispose();
+    }
+    shards.length = 0;
+    if (boomRing) {
+      scene.remove(boomRing);
+      boomRing.geometry.dispose();
+      (boomRing.material as THREE.Material).dispose();
+      boomRing = null;
+    }
+    if (boomCore) {
+      scene.remove(boomCore);
+      boomCore.geometry.dispose();
+      (boomCore.material as THREE.Material).dispose();
+      boomCore = null;
+    }
+  }
+
+  function tickParticles(dt: number) {
+    for (let i = particles.length - 1; i >= 0; i -= 1) {
+      const p = particles[i];
+      p.mesh.position.addScaledVector(p.vel, dt);
+      p.vel.multiplyScalar(0.96);
+      p.life -= dt;
+      if (p.life <= 0) {
+        hooks.getScene().remove(p.mesh);
+        particles.splice(i, 1);
+      }
+    }
+  }
+
+  function beginBoom() {
+    if (phase === "boom" || phase === "exit" || phase === "idle") return;
+    state.over = true;
+    state.earthHP = 0;
+    phase = "boom";
+    boomT = 0;
+    flash = 1;
+    veil = 0;
+    for (const e of enemies) hooks.getScene().remove(e.mesh);
+    for (const shot of projectiles) hooks.getScene().remove(shot.mesh);
+    enemies.length = 0;
+    projectiles.length = 0;
+    if (aimLine) aimLine.visible = false;
+    if (cross) cross.visible = false;
+    for (const cannon of cannons) cannon.visible = false;
+    const scene = hooks.getScene();
+    for (let i = 0; i < 56; i += 1) {
+      const hot = i % 4;
+      const mesh = new THREE.Mesh(
+        new THREE.TetrahedronGeometry(0.05 + Math.random() * 0.12, 0),
+        new THREE.MeshStandardMaterial({
+          color: hot === 0 ? 0xfff6d8 : hot === 1 ? 0xff5a1f : hot === 2 ? 0xffb15a : 0x163a66,
+          emissive: hot === 3 ? 0x0b1c33 : 0xff6a22,
+          emissiveIntensity: hot === 3 ? 0.2 : 1.6,
+          roughness: 0.4,
+          metalness: 0.18,
+          transparent: true,
+        }),
+      );
+      const dir = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, (Math.random() - 0.5) * 0.55).normalize();
+      mesh.position.copy(dir).multiplyScalar(0.12 + Math.random() * 0.4);
+      scene.add(mesh);
+      shards.push({
+        mesh,
+        vel: dir.clone().multiplyScalar(1.15 + Math.random() * 2.9),
+        spin: new THREE.Vector3((Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8, (Math.random() - 0.5) * 5),
+      });
+    }
+    boomRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.18, 0.42, 80),
+      new THREE.MeshBasicMaterial({
+        color: 0xfff6e8,
+        transparent: true,
+        opacity: 1,
+        side: THREE.DoubleSide,
+        depthTest: false,
+      }),
+    );
+    boomRing.renderOrder = 12;
+    scene.add(boomRing);
+    boomCore = new THREE.Mesh(
+      new THREE.SphereGeometry(0.42, 24, 16),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1, depthTest: false }),
+    );
+    boomCore.renderOrder = 13;
+    scene.add(boomCore);
+    burst(new THREE.Vector3(0, 0, 0), 0xfff1d2, 18);
+  }
+
+  function updateBoom(dt: number, cam: THREE.PerspectiveCamera) {
+    boomT += dt;
+    flash = boomT < 0.18 ? 1 : Math.max(0, 1 - (boomT - 0.18) / 0.62);
+    veil = boomT > 1.35 ? Math.min(0.78, (boomT - 1.35) / 0.5) : 0;
+    cam.position.set(0, 0, viewZ(cam));
+    cam.up.set(0, 1, 0);
+    cam.lookAt(0, 0, 0);
+    placeMoon(performance.now() * 0.00035, dt);
+    for (const shard of shards) {
+      shard.mesh.position.addScaledVector(shard.vel, dt);
+      shard.mesh.rotation.x += shard.spin.x * dt;
+      shard.mesh.rotation.y += shard.spin.y * dt;
+      shard.vel.multiplyScalar(0.988);
+      const mat = shard.mesh.material as THREE.MeshStandardMaterial;
+      mat.opacity = Math.max(0, 1 - Math.max(0, boomT - 0.35) / 1.35);
+    }
+    if (boomRing) {
+      const k = Math.min(1, boomT / 1.2);
+      boomRing.scale.setScalar(1 + k * 22);
+      (boomRing.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.95 * (1 - k));
+    }
+    if (boomCore) {
+      const k = Math.min(1, boomT / 0.48);
+      boomCore.scale.setScalar(1 + k * 8);
+      (boomCore.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 1 - k);
+    }
+    tickParticles(dt);
+    if (boomT >= 1.9) exit("boom");
   }
 
   function placeMoon(spin: number, dt: number) {
@@ -419,7 +582,11 @@ export function createDefenseMode(hooks: DefenseHooks) {
       camT += dt;
       const k = Math.min(1, camT / 1);
       const e = k * k * (3 - 2 * k);
-      if (phase === "enter") camTo.copy(new THREE.Vector3(0, 0, frameDistance(cam)));
+      if (phase === "enter") camTo.set(0, 0, viewZ(cam));
+      if (phase === "exit") {
+        flash = Math.max(0, flash - dt * 2.4);
+        veil = Math.max(0, veil - dt * 0.72);
+      }
       cam.position.lerpVectors(camFrom, camTo, e);
       controls.target.lerpVectors(targetFrom, targetTo, e);
       cam.up.set(0, 1, 0);
@@ -437,13 +604,24 @@ export function createDefenseMode(hooks: DefenseHooks) {
           controls.enabled = true;
           phase = "idle";
           state.active = false;
+          if (pendingFinale) {
+            finale = { score: Math.floor(state.score), wave: state.wave, highscore: state.highscore };
+            pendingFinale = false;
+          } else finale = null;
+          flash = 0;
+          veil = 0;
           hooks.onExit();
         }
       }
       return;
     }
 
-    cam.position.set(0, 0, frameDistance(cam));
+    if (phase === "boom") {
+      updateBoom(dt, cam);
+      return;
+    }
+
+    cam.position.set(0, 0, viewZ(cam));
     cam.up.set(0, 1, 0);
     controls.target.set(0, 0, 0);
     cam.lookAt(0, 0, 0);
@@ -488,11 +666,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
         hooks.getScene().remove(e.mesh);
         enemies.splice(i, 1);
         if (state.earthHP <= 0) {
-          state.over = true;
-          for (const left of enemies) hooks.getScene().remove(left.mesh);
-          for (const shot of projectiles) hooks.getScene().remove(shot.mesh);
-          enemies.length = 0;
-          projectiles.length = 0;
+          beginBoom();
           return;
         }
       }
@@ -551,16 +725,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
       }
     }
 
-    for (let i = particles.length - 1; i >= 0; i -= 1) {
-      const p = particles[i];
-      p.mesh.position.addScaledVector(p.vel, dt);
-      p.vel.multiplyScalar(0.96);
-      p.life -= dt;
-      if (p.life <= 0) {
-        hooks.getScene().remove(p.mesh);
-        particles.splice(i, 1);
-      }
-    }
+    tickParticles(dt);
   }
 
   function readPointer(e: PointerEvent | TouchEvent) {
@@ -577,16 +742,27 @@ export function createDefenseMode(hooks: DefenseHooks) {
   }
 
   function onPointer(e: PointerEvent | TouchEvent) {
-    if (phase !== "play") return;
+    if (phase !== "play" && phase !== "enter") return;
+    if ("touches" in e && e.touches.length >= 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const dist = Math.hypot(dx, dy) || 1;
+      if (pinchDist > 0) zoom = THREE.MathUtils.clamp(zoom * (pinchDist / dist), ZOOM_MIN, ZOOM_MAX);
+      pinchDist = dist;
+      return;
+    }
+    pinchDist = 0;
+    if (phase !== "play" || state.over) return;
     if (!readPointer(e)) return;
     if (!raycaster.ray.intersectPlane(plane, hit)) return;
     if (hit.length() < 0.45) return;
     aimAngle = Math.atan2(hit.y, hit.x);
-    const dist = THREE.MathUtils.clamp(hit.length(), RIM + 0.55, 8.2);
+    const dist = THREE.MathUtils.clamp(hit.length(), RIM + 0.55, Math.max(8.2, horizon()));
     aimPoint.set(Math.cos(aimAngle) * dist, Math.sin(aimAngle) * dist, 0);
   }
 
   function onPointerUp(e: PointerEvent) {
+    pinchDist = 0;
     if (phase !== "play" || state.lunarEnergy < 100) return;
     if (!readPointer(e)) return;
     const moon = hooks.getMoon();
@@ -607,6 +783,12 @@ export function createDefenseMode(hooks: DefenseHooks) {
     state.weaponType = "base";
     state.levels = { base: 1, mg: 0, multi: 0, homing: 0 };
     state.over = false;
+    finale = null;
+    pendingFinale = false;
+    flash = 0;
+    veil = 0;
+    zoom = 1;
+    pinchDist = 0;
     spawnTimer = 0.4;
     fireCooldown = 0.2;
     waveTimer = 0;
@@ -617,7 +799,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
     savedCam.copy(cam.position);
     savedTarget.copy(controls.target);
     camFrom.copy(cam.position);
-    camTo.set(0, 0, frameDistance(cam as THREE.PerspectiveCamera));
+    camTo.set(0, 0, viewZ(cam as THREE.PerspectiveCamera));
     targetFrom.copy(controls.target);
     targetTo.set(0, 0, 0);
     camT = 0;
@@ -629,8 +811,10 @@ export function createDefenseMode(hooks: DefenseHooks) {
     syncCannons();
   }
 
-  function exit() {
+  function exit(kind: "user" | "boom" = "user") {
     if (phase === "idle" || phase === "exit") return;
+    pendingFinale = kind === "boom";
+    clearBoom();
     clearActors();
     if (state.score > state.highscore) {
       state.highscore = state.score;
@@ -710,10 +894,12 @@ export function createDefenseMode(hooks: DefenseHooks) {
     update,
     onPointer,
     onPointerUp,
+    onWheel,
     lunarShockwave,
     buyUpgrade,
     retry,
     holdsCamera,
+    hidesPlanet,
     snapshot,
   };
 }

@@ -960,6 +960,96 @@
   opacity: 0.55;
 }
 
+.et-def-flash,
+.et-def-veil {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.et-def-flash {
+  z-index: 45;
+  background: #fff;
+}
+
+.et-def-veil {
+  z-index: 34;
+  background: #05070b;
+}
+
+.et-over {
+  position: fixed;
+  inset: 0;
+  z-index: 36;
+  display: grid;
+  place-items: center;
+  padding: 1.2rem;
+  background: color-mix(in srgb, #05070b 46%, transparent);
+}
+
+.et-over-card {
+  width: min(22rem, 100%);
+  padding: 1.15rem 1.15rem 1rem;
+  border: 1px solid var(--color-line);
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--color-bg) 90%, transparent);
+  backdrop-filter: blur(16px);
+}
+
+.et-over-card p {
+  margin: 0;
+  color: #ff8d7c;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.et-over-card h2 {
+  margin: 0.3rem 0 0.85rem;
+  font-size: 1.5rem;
+  font-weight: 560;
+}
+
+.et-over-card ul {
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.4rem;
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+.et-over-card strong {
+  float: right;
+  color: var(--color-fg);
+}
+
+.et-over-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.et-over-actions button {
+  flex: 1;
+  min-height: 2.55rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-fg);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.et-over-actions button:first-child {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
 .et-def-retry {
   margin-left: auto;
   min-height: 1.6rem;
