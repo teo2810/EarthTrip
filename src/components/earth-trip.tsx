@@ -287,6 +287,21 @@ export function EarthTrip() {
           <SlidersHorizontal />
           Pannello
         </button>
+        <button
+          type="button"
+          className={defenseActive ? "et-btn is-on" : "et-btn"}
+          onClick={() => {
+            if (defenseActive) {
+              apiRef.current?.exitDefense();
+              setDefenseActive(false);
+            } else {
+              apiRef.current?.enterDefense();
+              setDefenseActive(true);
+            }
+          }}
+        >
+          🎮 {defenseActive ? "Esci" : "Difendi"}
+        </button>
       </nav>
 
       <aside className={panel ? "et-sheet is-open" : "et-sheet"} aria-label="Controlli">
