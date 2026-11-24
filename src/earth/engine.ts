@@ -391,22 +391,12 @@ export function mountEarth(
     vertexShader: `
       varying vec2 vUv;
       varying vec3 vN;
-      varying vec3 vT;
-      varying vec3 vB;
       varying vec3 vP;
       void main() {
         vUv = uv;
         vec4 w = modelMatrix * vec4(position, 1.0);
         vP = w.xyz;
-        vec3 posN = normalize(position);
-        vec3 t = cross(vec3(0.0, 1.0, 0.0), posN);
-        if (dot(t, t) < 1e-4) t = vec3(1.0, 0.0, 0.0);
-        t = normalize(t);
-        vec3 b = normalize(cross(posN, t));
-        mat3 m = mat3(modelMatrix);
-        vN = normalize(m * posN);
-        vT = normalize(m * t);
-        vB = normalize(m * b);
+        vN = normalize(mat3(modelMatrix) * normal);
         gl_Position = projectionMatrix * viewMatrix * w;
       }
     `,
@@ -416,31 +406,22 @@ export function mountEarth(
       uniform vec3 sunDir;
       varying vec2 vUv;
       varying vec3 vN;
-      varying vec3 vT;
-      varying vec3 vB;
       varying vec3 vP;
       void main() {
         vec3 n = normalize(vN), s = normalize(sunDir), v = normalize(cameraPosition - vP);
+        float ndl = dot(n, s);
+        float m0 = max(ndl, 0.0);
+        float m = max(dot(n, v), 0.0);
+        float ls = m0 / (m0 + m + 0.02);
         vec3 alb = texture2D(map, vUv).rgb;
-        float lum = dot(alb, vec3(0.2126, 0.7152, 0.0722));
-        float eps = 0.0018;
-        float lumR = dot(texture2D(map, vUv + vec2(eps, 0.0)).rgb, vec3(0.2126, 0.7152, 0.0722));
-        float lumU = dot(texture2D(map, vUv + vec2(0.0, eps)).rgb, vec3(0.2126, 0.7152, 0.0722));
-        float graze = smoothstep(0.42, 0.0, abs(dot(n, s)));
-        vec3 nRel = normalize(n + (normalize(vT) * (lumR - lum) + normalize(vB) * (lumU - lum)) * (34.0 * graze));
-        float ndl = dot(nRel, s);
-        float lit = smoothstep(-0.03, 0.16, ndl);
-        float shade = pow(clamp(ndl, 0.0, 1.0), 0.48);
-        vec3 shaped = alb * mix(0.72, 1.28, smoothstep(0.16, 0.62, lum));
-        vec3 col = shaped * mix(0.32, 1.0, shade) * lit;
-        float fres = pow(1.0 - clamp(dot(n, v), 0.0, 1.0), 3.4);
-        col += vec3(0.16, 0.2, 0.3) * fres * 0.03 * (1.0 - lit);
+        float day = smoothstep(-0.04, 0.16, ndl);
+        vec3 col = mix(alb * 0.14, alb * ls * 1.8, day);
         gl_FragColor = vec4(col, 1.0);
         #include <colorspace_fragment>
       }
     `,
   });
-  const moonMesh = new THREE.Mesh(new THREE.SphereGeometry(MOON_R, 128, 96), moonMat);
+  const moonMesh = new THREE.Mesh(new THREE.SphereGeometry(MOON_R, 64, 64), moonMat);
   moonMesh.scale.set(1, 1, 1);
   moonPivot.add(moonMesh);
   const limbPts: THREE.Vector3[] = [];
@@ -450,7 +431,7 @@ export function mountEarth(
   }
   const moonLimb = new THREE.LineLoop(
     new THREE.BufferGeometry().setFromPoints(limbPts),
-    new THREE.LineBasicMaterial({ color: 0xd5dde6, transparent: true, opacity: 0.26, depthTest: false, depthWrite: false }),
+    new THREE.LineBasicMaterial({ color: 0xd5dde6, transparent: true, opacity: 0.24, depthTest: false, depthWrite: false }),
   );
   moonLimb.visible = false;
   moonLimb.renderOrder = 4;
@@ -768,6 +749,7 @@ export function mountEarth(
     const trueRadii = (moon.length() * AU_KM) / EARTH_KM;
     const dir = moon.clone().normalize();
     moonPivot.position.copy(dir.multiplyScalar(flags.trueMoon ? trueRadii : MOON_VISUAL));
+    moonPivot.scale.set(1, 1, 1);
     orientMoon(moonPivot, moonPivot.position);
     nightUniform.value = flags.nightLights ? 1 : 0;
     atmo.visible = flags.atmosphere;
@@ -928,14 +910,15 @@ export function mountEarth(
     const r = MOON_R;
     const toward = (r * r) / d;
     const limbR = r * Math.sqrt(Math.max(1 - (r * r) / (d * d), 0));
-    const halo = Math.max(limbR, 0.0001) * 1.16;
+    const halo = Math.max(limbR, 0.0001) * 1.12;
     const px = ((r / d) * Math.max(viewport.clientHeight, 1)) / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
     limbN.copy(camera.position).sub(moonPivot.position).normalize();
     limbQ.setFromUnitVectors(limbAxis, limbN);
     moonLimb.position.copy(moonPivot.position).addScaledVector(limbN, toward);
     moonLimb.quaternion.copy(limbQ);
-    moonLimb.scale.set(halo, halo, halo);
-    moonLimb.visible = !surfaceLock && mode !== "moon" && px < 22 && d > r * 5;
+    moonLimb.scale.setScalar(halo);
+    const distant = camera.position.length() > 8 && d > 4 && px < 36;
+    moonLimb.visible = !surfaceLock && mode !== "moon" && distant;
     const ms = Math.max(0.012, moonDist * 0.012);
     for (const marker of markers) marker.scale.setScalar(ms);
   }
