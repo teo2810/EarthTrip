@@ -191,13 +191,17 @@ export function mountEarth(
   let publishAt = 0;
   let orbitAt = 0;
   let orbitIdx = 0;
+  let orbitStep = 0;
   let frameNo = 0;
+  let mapSyncAt = 0;
+  let mapPending = false;
+  let view: Telemetry["view"] = "globe";
   let fps = 0;
   let frames = 0;
   let fpsStamp = performance.now();
 
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(42, 1, 0.001, 400);
+  const camera = new THREE.PerspectiveCamera(42, 1, 0.001, 2200);
   const clockStart = performance.now();
   let lastTick = clockStart;
   const raycaster = new THREE.Raycaster();
@@ -387,12 +391,22 @@ export function mountEarth(
     vertexShader: `
       varying vec2 vUv;
       varying vec3 vN;
+      varying vec3 vT;
+      varying vec3 vB;
       varying vec3 vP;
       void main() {
         vUv = uv;
         vec4 w = modelMatrix * vec4(position, 1.0);
         vP = w.xyz;
-        vN = normalize(mat3(modelMatrix) * normal);
+        vec3 posN = normalize(position);
+        vec3 t = cross(vec3(0.0, 1.0, 0.0), posN);
+        if (dot(t, t) < 1e-4) t = vec3(1.0, 0.0, 0.0);
+        t = normalize(t);
+        vec3 b = normalize(cross(posN, t));
+        mat3 m = mat3(modelMatrix);
+        vN = normalize(m * posN);
+        vT = normalize(m * t);
+        vB = normalize(m * b);
         gl_Position = projectionMatrix * viewMatrix * w;
       }
     `,
@@ -402,19 +416,68 @@ export function mountEarth(
       uniform vec3 sunDir;
       varying vec2 vUv;
       varying vec3 vN;
+      varying vec3 vT;
+      varying vec3 vB;
       varying vec3 vP;
       void main() {
         vec3 n = normalize(vN), s = normalize(sunDir), v = normalize(cameraPosition - vP);
-        float m0 = max(dot(n, s), 0.0), m = max(dot(n, v), 0.0);
-        float ls = m0 / (m0 + m + 0.02);
         vec3 alb = texture2D(map, vUv).rgb;
-        gl_FragColor = vec4(alb * ls * 1.8 * smoothstep(0.0, 0.06, m0) + alb * 0.004, 1.0);
+        float lum = dot(alb, vec3(0.2126, 0.7152, 0.0722));
+        float eps = 0.0018;
+        float lumR = dot(texture2D(map, vUv + vec2(eps, 0.0)).rgb, vec3(0.2126, 0.7152, 0.0722));
+        float lumU = dot(texture2D(map, vUv + vec2(0.0, eps)).rgb, vec3(0.2126, 0.7152, 0.0722));
+        float graze = smoothstep(0.42, 0.0, abs(dot(n, s)));
+        vec3 nRel = normalize(n + (normalize(vT) * (lumR - lum) + normalize(vB) * (lumU - lum)) * (34.0 * graze));
+        float ndl = dot(nRel, s);
+        float lit = smoothstep(-0.03, 0.16, ndl);
+        float shade = pow(clamp(ndl, 0.0, 1.0), 0.48);
+        vec3 shaped = alb * mix(0.72, 1.28, smoothstep(0.16, 0.62, lum));
+        vec3 col = shaped * mix(0.32, 1.0, shade) * lit;
+        float fres = pow(1.0 - clamp(dot(n, v), 0.0, 1.0), 3.4);
+        col += vec3(0.16, 0.2, 0.3) * fres * 0.03 * (1.0 - lit);
+        gl_FragColor = vec4(col, 1.0);
         #include <colorspace_fragment>
       }
     `,
   });
-  const moonMesh = new THREE.Mesh(new THREE.SphereGeometry(MOON_R, 64, 48), moonMat);
+  const moonMesh = new THREE.Mesh(new THREE.SphereGeometry(MOON_R, 128, 96), moonMat);
+  moonMesh.scale.set(1, 1, 1);
   moonPivot.add(moonMesh);
+  const limbPts: THREE.Vector3[] = [];
+  for (let i = 0; i <= 96; i += 1) {
+    const a = (i / 96) * Math.PI * 2;
+    limbPts.push(new THREE.Vector3(Math.cos(a), Math.sin(a), 0));
+  }
+  const moonLimb = new THREE.LineLoop(
+    new THREE.BufferGeometry().setFromPoints(limbPts),
+    new THREE.LineBasicMaterial({ color: 0xd5dde6, transparent: true, opacity: 0.26, depthTest: false, depthWrite: false }),
+  );
+  moonLimb.visible = false;
+  moonLimb.renderOrder = 4;
+  const limbN = new THREE.Vector3();
+  const limbQ = new THREE.Quaternion();
+  const limbAxis = new THREE.Vector3(0, 0, 1);
+  scene.add(moonLimb);
+  const astroEarth = new THREE.Group();
+  astroEarth.add(guideLine([new THREE.Vector3(0, -1.72, 0), new THREE.Vector3(0, 1.72, 0)], 0x9eb0c4, 0.42));
+  astroEarth.add(equatorRing(1.035, 0x9eb0c4, 0.28));
+  astroEarth.add(spinArc(1.1));
+  astroEarth.visible = false;
+  scene.add(astroEarth);
+  const astroMoon = new THREE.Group();
+  astroMoon.add(guideLine([new THREE.Vector3(0, -MOON_R * 2.15, 0), new THREE.Vector3(0, MOON_R * 2.15, 0)], 0xb7c3d1, 0.55));
+  astroMoon.add(equatorRing(MOON_R * 1.05, 0xb7c3d1, 0.4));
+  astroMoon.visible = false;
+  moonPivot.add(astroMoon);
+  const astroEls = ["Asse terrestre · 23,4°", "Verso est · 23 h 56 min", "Asse lunare", ""].map((text) => {
+    const el = document.createElement("div");
+    el.className = "et-label is-astro";
+    el.textContent = text;
+    el.style.display = "none";
+    labelsEl.appendChild(el);
+    return el;
+  });
+  const [northEl, spinEl, moonAxisEl, moonDataEl] = astroEls;
   scene.add(moonPivot);
 
   const markerGeo = new THREE.SphereGeometry(1, 10, 8);
@@ -552,6 +615,13 @@ export function mountEarth(
       root.add(dot, hit);
       const geo = new THREE.BufferGeometry();
       geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array((ORBIT_STEPS + 1) * 3), 3));
+      const posAttr = geo.getAttribute("position") as THREE.BufferAttribute;
+      const seed = posAttr.array as Float32Array;
+      for (let i = 0; i <= ORBIT_STEPS; i += 1) {
+        seed[i * 3] = probe.pos.x;
+        seed[i * 3 + 1] = probe.pos.y;
+        seed[i * 3 + 2] = probe.pos.z;
+      }
       const line = new THREE.Line(geo, missionInfo ? missionLine[missionInfo.kind] : lineMat[group]);
       line.frustumCulled = false;
       scene.add(root, line);
@@ -583,8 +653,8 @@ export function mountEarth(
     }
     if (keepSelected != null && !sats.some((s) => s.raw.norad === keepSelected)) selectedNorad = null;
     orbitIdx = 0;
-    updateOrbits(simDate());
-    orbitAt = performance.now();
+    orbitStep = 0;
+    orbitAt = 0;
   }
 
   buildSats(FALLBACK_SATS);
@@ -627,51 +697,59 @@ export function mountEarth(
     if (mode === "follow") {
       mode = "free";
       followNorad = null;
+      view = "globe";
+      publish(true);
     }
   });
 
   let raf = 0;
   const loop = () => {
     if (disposed) return;
-    const nowTick = performance.now();
-    const rawDt = (nowTick - lastTick) / 1000;
-    lastTick = nowTick;
-    const dt = Math.min(Math.max(rawDt, 0), 0.05);
-    const animDt = Math.min(Math.max(rawDt, 0), 0.25);
-    const date = simDate();
-    updateSunMoon(date);
-    updateSatPositions(date);
-    if (performance.now() - orbitAt > 2500) {
-      orbitIdx = 0;
-      orbitAt = performance.now();
+    try {
+      const nowTick = performance.now();
+      const rawDt = (nowTick - lastTick) / 1000;
+      lastTick = nowTick;
+      const dt = Math.min(Math.max(rawDt, 0), 0.05);
+      const animDt = Math.min(Math.max(rawDt, 0), 0.25);
+      const date = simDate();
+      updateSunMoon(date);
+      updateSatPositions(date);
+      if (orbitIdx >= sats.length && performance.now() - orbitAt > 2500) {
+        orbitIdx = 0;
+        orbitStep = 0;
+        orbitAt = performance.now();
+      }
+      updateOrbits(date, 16);
+      stepCamera(animDt);
+      applyLimits();
+      tuneControls(dt);
+      controls.enabled = !surfaceLock;
+      controls.update(dt);
+      if (camera.position.length() < 1.012 && controls.target.length() < 0.5) camera.position.setLength(1.012);
+      clouds.rotation.y += dt * 0.00005;
+      updateScales();
+      updateAstro();
+      updateSurface();
+      updateLabels();
+      if ((frameNo++ & 1) === 0) updateGeoLabels();
+      const dE = camera.position.length() - 1.02;
+      const dM = camera.position.distanceTo(moonPivot.position) - MOON_R * 1.02;
+      const nr = THREE.MathUtils.clamp(Math.min(dE, dM) * 0.4, 0.0005, 2);
+      if (Number.isFinite(nr) && Math.abs(nr - camera.near) / camera.near > 0.05) {
+        camera.near = nr;
+        camera.updateProjectionMatrix();
+      }
+      renderer.render(scene, camera);
+      countFps();
+      if (!readySent) {
+        readySent = true;
+        hooks.onReady();
+      }
+      publish(false);
+    } catch (err) {
+      console.error(err);
     }
-    updateOrbits(date, 4);
-    stepCamera(animDt);
-    applyLimits();
-    tuneControls(dt);
-    controls.enabled = !surfaceLock;
-    controls.update(dt);
-    if (camera.position.length() < 1.012 && controls.target.length() < 0.5) camera.position.setLength(1.012);
-    clouds.rotation.y += dt * 0.00005;
-    updateScales();
-    updateSurface();
-    updateLabels();
-    if ((frameNo++ & 1) === 0) updateGeoLabels();
-    const dE = camera.position.length() - 1.02;
-    const dM = camera.position.distanceTo(moonPivot.position) - MOON_R * 1.02;
-    const nr = THREE.MathUtils.clamp(Math.min(dE, dM) * 0.4, 0.0005, 2);
-    if (Math.abs(nr - camera.near) / camera.near > 0.05) {
-      camera.near = nr;
-      camera.updateProjectionMatrix();
-    }
-    renderer.render(scene, camera);
-    countFps();
-    if (!readySent) {
-      readySent = true;
-      hooks.onReady();
-    }
-    publish(false);
-    raf = requestAnimationFrame(loop);
+    if (!disposed) raf = requestAnimationFrame(loop);
   };
   raf = requestAnimationFrame(loop);
 
@@ -716,6 +794,10 @@ export function mountEarth(
   }
 
   function bandOn(sat: SatObj) {
+    const cam = camera.position.length();
+    const pinned = sat.raw.norad === selectedNorad || sat.raw.norad === followNorad;
+    if (!pinned && sat.regime === "leo" && cam > 8) return false;
+    if (!pinned && sat.regime === "meo" && cam > 24) return false;
     if (sat.regime === "leo") return flags.leo;
     if (sat.regime === "meo") return flags.meo;
     return flags.geo;
@@ -728,28 +810,43 @@ export function mountEarth(
     return flags.allOrbits || sat.featured;
   }
 
-  function updateOrbits(date: Date, budget = Infinity) {
+  const orbitWhen = new Date();
+  function updateOrbits(date: Date, budget = 16) {
+    if (!sats.length) return;
     const gmstNow = gstime(date);
-    for (let done = 0; orbitIdx < sats.length && done < budget; orbitIdx += 1) {
+    const t0 = date.getTime();
+    let done = 0;
+    while (done < budget && orbitIdx < sats.length) {
       const sat = sats[orbitIdx]!;
-      if (!sat.line.visible) continue;
+      if (!sat.line.visible || !Number.isFinite(sat.periodMin) || sat.periodMin <= 0) {
+        orbitIdx += 1;
+        orbitStep = 0;
+        continue;
+      }
       const attr = sat.line.geometry.getAttribute("position") as THREE.BufferAttribute;
       const arr = attr.array as Float32Array;
-      let last = sat.pos;
-      for (let i = 0; i <= ORBIT_STEPS; i += 1) {
-        const pv = safePropagate(sat.satrec, new Date(date.getTime() + (i / ORBIT_STEPS) * sat.periodMin * 60_000));
-        let point = last;
+      const span = Math.min(ORBIT_STEPS, orbitStep + (budget - done) - 1);
+      for (let i = orbitStep; i <= span; i += 1) {
+        orbitWhen.setTime(t0 + (i / ORBIT_STEPS) * sat.periodMin * 60_000);
+        const pv = safePropagate(sat.satrec, orbitWhen);
         if (pv) {
           const e = eciToEcf(pv.position, gmstNow);
-          point = ecfToThree(e.x, e.y, e.z);
-          last = point;
+          arr[i * 3] = e.x / EARTH_KM;
+          arr[i * 3 + 1] = e.z / EARTH_KM;
+          arr[i * 3 + 2] = -e.y / EARTH_KM;
+        } else if (i > 0) {
+          arr[i * 3] = arr[(i - 1) * 3] ?? sat.pos.x;
+          arr[i * 3 + 1] = arr[(i - 1) * 3 + 1] ?? sat.pos.y;
+          arr[i * 3 + 2] = arr[(i - 1) * 3 + 2] ?? sat.pos.z;
         }
-        arr[i * 3] = point.x;
-        arr[i * 3 + 1] = point.y;
-        arr[i * 3 + 2] = point.z;
+        done += 1;
       }
       attr.needsUpdate = true;
-      done += 1;
+      orbitStep = span + 1;
+      if (orbitStep > ORBIT_STEPS) {
+        orbitIdx += 1;
+        orbitStep = 0;
+      }
     }
   }
 
@@ -781,11 +878,13 @@ export function mountEarth(
     const nearOrigin = controls.target.length() < 0.5;
     const targetMoon = controls.target.distanceTo(moonPivot.position) < 1.2;
     if (nearOrigin) {
+      const reach = Math.max(moonPivot.position.length(), MOON_VISUAL);
+      const half = THREE.MathUtils.degToRad(Math.max(12, camera.fov * 0.36));
       controls.minDistance = 1.018;
-      controls.maxDistance = flags.trueMoon ? 150 : 42;
+      controls.maxDistance = Math.max(36, reach / Math.tan(half) + reach * 0.12);
     } else if (targetMoon || mode === "moon") {
       controls.minDistance = MOON_R * 1.15;
-      controls.maxDistance = 30;
+      controls.maxDistance = flags.trueMoon ? Math.max(48, moonPivot.position.length() * 0.75) : 30;
     } else {
       controls.minDistance = 0.08;
       controls.maxDistance = 8;
@@ -801,9 +900,11 @@ export function mountEarth(
     const alt = Math.max(dist - R * 1.018, 0.002);
     const grab = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / Math.PI;
     const u = THREE.MathUtils.clamp(alt / R / 0.75, 0, 1);
-    controls.rotateSpeed = onEarth || onMoon ? THREE.MathUtils.clamp((grab * alt) / R, 0.004, 0.8) : 0.3;
-    controls.zoomSpeed = THREE.MathUtils.clamp((0.85 * alt) / dist, 0.01, 0.85);
-    controls.dampingFactor = 1 - Math.exp(-dt * (80 - 70 * u * u));
+    const track = (grab * alt) / R;
+    controls.rotateSpeed = onEarth || onMoon ? THREE.MathUtils.clamp(track, 0.004, 0.72) : 0.3;
+    controls.zoomSpeed = THREE.MathUtils.clamp(0.18 + 0.62 * u, 0.18, 0.85);
+    const dampDt = Math.max(dt, 1 / 120);
+    controls.dampingFactor = 1 - Math.exp(-dampDt * (80 - 70 * u * u));
     controls.autoRotateSpeed = reduce ? 0 : 0.015 + 0.2 * u * u;
     controls.enablePan = false;
   }
@@ -811,10 +912,10 @@ export function mountEarth(
   function updateScales() {
     for (const sat of sats) {
       const dist = Math.max(0.4, camera.position.distanceTo(sat.pos));
-      const base = sat.group === "station" ? 0.011 : sat.group === "starlink" ? 0.006 : 0.008;
+      const base = sat.group === "station" ? 0.0042 : sat.group === "starlink" ? 0.0024 : 0.003;
       const selected = sat.raw.norad === selectedNorad ? 1.7 : 1;
       const missionBoost = sat.mission ? 1.25 : 1;
-      const s = Math.max(base, dist * 0.007) * selected * missionBoost;
+      const s = Math.max(base, dist * 0.0024) * selected * missionBoost;
       sat.dot.scale.setScalar(s);
       sat.hit.scale.setScalar(s * 2.4);
       if (sat.ring) {
@@ -822,9 +923,61 @@ export function mountEarth(
         sat.ring.quaternion.copy(camera.quaternion);
       }
     }
-    const moonDist = Math.max(0.3, camera.position.distanceTo(moonPivot.position));
+    const moonDist = Math.max(0.05, camera.position.distanceTo(moonPivot.position));
+    const d = moonDist;
+    const r = MOON_R;
+    const toward = (r * r) / d;
+    const limbR = r * Math.sqrt(Math.max(1 - (r * r) / (d * d), 0));
+    const halo = Math.max(limbR, 0.0001) * 1.16;
+    const px = ((r / d) * Math.max(viewport.clientHeight, 1)) / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
+    limbN.copy(camera.position).sub(moonPivot.position).normalize();
+    limbQ.setFromUnitVectors(limbAxis, limbN);
+    moonLimb.position.copy(moonPivot.position).addScaledVector(limbN, toward);
+    moonLimb.quaternion.copy(limbQ);
+    moonLimb.scale.set(halo, halo, halo);
+    moonLimb.visible = !surfaceLock && mode !== "moon" && px < 22 && d > r * 5;
     const ms = Math.max(0.012, moonDist * 0.012);
     for (const marker of markers) marker.scale.setScalar(ms);
+  }
+
+  function placeAstro(el: HTMLDivElement, world: THREE.Vector3) {
+    const w = viewport.clientWidth;
+    const h = viewport.clientHeight;
+    const ndc = world.clone().project(camera);
+    const x = (ndc.x * 0.5 + 0.5) * w;
+    const y = (-ndc.y * 0.5 + 0.5) * h;
+    if (ndc.z < -1 || ndc.z > 1 || x < -30 || y < -30 || x > w + 30 || y > h + 30) {
+      el.style.display = "none";
+      return;
+    }
+    el.style.display = "block";
+    el.style.left = `${x}px`;
+    el.style.top = `${y}px`;
+  }
+
+  function updateAstro() {
+    const on = flags.astro && !surfaceLock;
+    astroEarth.visible = on;
+    astroMoon.visible = on;
+    if (!on) {
+      for (const el of astroEls) el.style.display = "none";
+      return;
+    }
+    placeAstro(northEl, new THREE.Vector3(0, 1.88, 0));
+    if (camera.position.length() > 28) spinEl.style.display = "none";
+    else placeAstro(spinEl, new THREE.Vector3(Math.cos(0.45) * 1.18, 0.1, -Math.sin(0.45) * 1.18));
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(moonPivot.quaternion);
+    const moonDist = camera.position.distanceTo(moonPivot.position);
+    const px = ((MOON_R / Math.max(moonDist, 0.05)) * viewport.clientHeight) / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
+    const distKm = Math.round(moonTrue.length() * AU_KM);
+    moonDataEl.textContent = `Raggio 1.737 km · ${distKm.toLocaleString("it-IT")} km · 27,3 giorni`;
+    if (px < 11) {
+      moonAxisEl.style.display = "none";
+      placeAstro(moonDataEl, moonPivot.position);
+    } else {
+      placeAstro(moonAxisEl, moonPivot.position.clone().addScaledVector(up, MOON_R * 2.4));
+      placeAstro(moonDataEl, moonPivot.position.clone().addScaledVector(up, -MOON_R * 2.6));
+    }
   }
 
   function updateSurface() {
@@ -836,6 +989,34 @@ export function mountEarth(
       return;
     }
     const altKm = (camera.position.length() - 1) * EARTH_KM;
+    const onEarth = !nearMoon && controls.target.length() < 0.5 && mode !== "anim" && mode !== "follow" && mode !== "moon";
+    if (onEarth && !surfaceLock && altKm < 180) {
+      ensureMap();
+      if (map) {
+        surfaceLock = true;
+        mapPinned = false;
+        view = "surface";
+        publish(true);
+      }
+    } else if (onEarth && surfaceLock && map && map.getZoom() <= 7) {
+      const center = map.getCenter();
+      const mapAlt = 36000 / 2 ** map.getZoom();
+      const radius = 1 + Math.max(mapAlt, 280) / EARTH_KM;
+      const prevDamp = controls.dampingFactor;
+      controls.dampingFactor = 1;
+      controls.update();
+      surfaceLock = false;
+      mapPinned = false;
+      mapEl.classList.remove("is-hot");
+      camera.position.copy(latLonToThree(center.lat, center.lng, radius));
+      controls.target.set(0, 0, 0);
+      controls.update();
+      controls.dampingFactor = prevDamp;
+      mode = "globe";
+      view = "globe";
+      publish(true);
+      return;
+    }
     const alpha = surfaceLock ? 1 : THREE.MathUtils.clamp((780 - altKm) / (780 - 150), 0, 1);
     mapEl.style.opacity = alpha.toFixed(3);
     if (alpha < 0.04 && !surfaceLock) {
@@ -848,7 +1029,7 @@ export function mountEarth(
     if (surfaceLock) {
       if (!mapPinned) {
         const look = lookAtEarth();
-        map.setView([look.lat, look.lon], zoomFromAlt(Math.max(altKm, 40)), { animate: false });
+        map.setView([look.lat, look.lon], Math.max(8, Math.round(zoomFromAlt(Math.max(altKm, 40)))), { animate: false });
         map.invalidateSize();
         mapPinned = true;
       }
@@ -856,10 +1037,13 @@ export function mountEarth(
     } else {
       mapPinned = false;
       mapEl.classList.remove("is-hot");
+      const now = performance.now();
+      if (now - mapSyncAt < 400) return;
       const look = lookAtEarth();
       const z = Math.round(zoomFromAlt(altKm));
       const c = map.getCenter();
-      if (Math.abs(c.lat - look.lat) > 2e-4 || Math.abs(c.lng - look.lon) > 2e-4 || map.getZoom() !== z) {
+      if (Math.abs(c.lat - look.lat) > 0.02 || Math.abs(c.lng - look.lon) > 0.02 || map.getZoom() !== z) {
+        mapSyncAt = now;
         map.setView([look.lat, look.lon], z, { animate: false });
       }
     }
@@ -992,16 +1176,21 @@ export function mountEarth(
   }
 
   function ensureMap() {
-    if (map) return;
-    map = createMap(mapEl, {
-      zoomControl: true,
-      attributionControl: false,
-      minZoom: 2,
-      maxZoom: 18,
-      worldCopyJump: true,
-    });
-    tileLayer(ESRI, { maxZoom: 19, maxNativeZoom: 19 }).addTo(map);
-    window.setTimeout(() => map?.invalidateSize(), 50);
+    if (map || mapPending) return;
+    mapPending = true;
+    window.setTimeout(() => {
+      mapPending = false;
+      if (map || disposed) return;
+      map = createMap(mapEl, {
+        zoomControl: true,
+        attributionControl: false,
+        minZoom: 2,
+        maxZoom: 18,
+        worldCopyJump: true,
+      });
+      tileLayer(ESRI, { maxZoom: 19, maxNativeZoom: 19 }).addTo(map);
+      window.setTimeout(() => map?.invalidateSize(), 50);
+    }, 0);
   }
 
   function pick(e: PointerEvent) {
@@ -1117,7 +1306,8 @@ export function mountEarth(
       tle: tleMode,
       surfaceAlpha: alpha,
       surfaceLock,
-      follow: mode === "follow",
+      follow: view === "iss",
+      view,
       selection: selectionNow(),
     });
   }
@@ -1145,6 +1335,7 @@ export function mountEarth(
     followNorad = sat.raw.norad;
     selectedNorad = sat.raw.norad;
     selectedMoon = null;
+    view = "iss";
     const cam = sat.pos.clone().add(sat.pos.clone().normalize().multiplyScalar(0.48));
     startAnim(cam, sat.pos.clone(), 1.15, () => {
       mode = "follow";
@@ -1154,18 +1345,22 @@ export function mountEarth(
 
   function goMoon() {
     followNorad = null;
+    view = "moon";
     const pos = moonPivot.position.clone();
     const cam = pos.clone().add(pos.clone().normalize().multiplyScalar(1.7));
     startAnim(cam, pos, 1.35, () => {
       mode = "moon";
     });
+    publish(true);
   }
 
   function goGlobal() {
     followNorad = null;
+    view = "globe";
     startAnim(latLonToThree(18, -32, 3.05), new THREE.Vector3(), 1.15, () => {
       mode = "globe";
     });
+    publish(true);
   }
 
   function goSurface() {
@@ -1174,6 +1369,7 @@ export function mountEarth(
       goMoon();
       return;
     }
+    view = "surface";
     const look = lookAtEarth();
     const cam = latLonToThree(look.lat, look.lon, 1.02);
     startAnim(cam, new THREE.Vector3(), 1.05, () => {
@@ -1181,16 +1377,19 @@ export function mountEarth(
       surfaceLock = true;
       mapPinned = false;
     });
+    publish(true);
   }
 
   function exitSurface() {
     surfaceLock = false;
     mapPinned = false;
     mapEl.classList.remove("is-hot");
+    view = "globe";
     const dir = camera.position.clone().normalize();
     startAnim(dir.multiplyScalar(3.05), new THREE.Vector3(), 1, () => {
       mode = "globe";
     });
+    publish(true);
   }
 
   function focusSelection() {
@@ -1233,7 +1432,7 @@ export function mountEarth(
     const pack: RawSat[] = [
       ...(stations ? parseTle(stations, "stations").filter((s) => keepStation(s.name)) : FALLBACK_SATS.filter((s) => s.source === "stations")),
       ...(gps ? parseTle(gps, "gps") : FALLBACK_SATS.filter((s) => s.source === "gps")),
-      ...(science ? parseTle(science, "science") : FALLBACK_SATS.filter((s) => s.source === "science")),
+      ...(science ? pickScience(parseTle(science, "science")) : FALLBACK_SATS.filter((s) => s.source === "science")),
       ...(galileo ? sampleEven(parseTle(galileo, "galileo"), 12) : FALLBACK_SATS.filter((s) => s.source === "galileo")),
       ...(glonass ? sampleEven(parseTle(glonass, "glonass"), 8) : []),
       ...(weather ? parseTle(weather, "geo").filter((s) => keepGeoName(s.name)).slice(0, 12) : FALLBACK_SATS.filter((s) => s.source === "geo")),
@@ -1309,6 +1508,20 @@ export function mountEarth(
     atmoMat.dispose();
     moonMesh.geometry.dispose();
     moonMat.dispose();
+    moonMesh.geometry.dispose();
+    moonMat.dispose();
+    moonLimb.geometry.dispose();
+    (moonLimb.material as THREE.Material).dispose();
+    for (const group of [astroEarth, astroMoon]) {
+      group.traverse((child) => {
+        const line = child as THREE.Line;
+        line.geometry?.dispose();
+        const material = line.material as THREE.Material | THREE.Material[] | undefined;
+        if (Array.isArray(material)) material.forEach((item) => item.dispose());
+        else material?.dispose();
+      });
+    }
+    for (const el of astroEls) el.remove();
     markerGeo.dispose();
     for (const material of Object.values(moonKindMat)) material.dispose();
     dotGeo.dispose();
@@ -1350,6 +1563,41 @@ export function mountEarth(
     },
     dispose,
   };
+}
+
+function guideLine(points: THREE.Vector3[], color: number, opacity: number) {
+  const geo = new THREE.BufferGeometry().setFromPoints(points);
+  const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false });
+  const line = new THREE.Line(geo, mat);
+  line.renderOrder = 6;
+  return line;
+}
+
+function equatorRing(radius: number, color: number, opacity: number) {
+  const pts: THREE.Vector3[] = [];
+  for (let i = 0; i <= 80; i += 1) {
+    const a = (i / 80) * Math.PI * 2;
+    pts.push(new THREE.Vector3(Math.cos(a) * radius, 0, Math.sin(a) * radius));
+  }
+  return guideLine(pts, color, opacity);
+}
+
+function spinArc(radius: number) {
+  const pts: THREE.Vector3[] = [];
+  const span = 0.9;
+  for (let i = 0; i <= 18; i += 1) {
+    const lon = (i / 18) * span;
+    pts.push(new THREE.Vector3(Math.cos(lon) * radius, 0.035, -Math.sin(lon) * radius));
+  }
+  const tip = pts[pts.length - 1];
+  const prev = pts[pts.length - 2];
+  const dir = tip.clone().sub(prev).normalize();
+  const side = new THREE.Vector3(0, 1, 0).cross(dir).normalize().multiplyScalar(0.055);
+  const back = dir.clone().multiplyScalar(0.09);
+  const group = new THREE.Group();
+  group.add(guideLine(pts, 0x3ee0a0, 0.55));
+  group.add(guideLine([tip.clone().add(side).sub(back), tip, tip.clone().sub(side).sub(back)], 0x3ee0a0, 0.55));
+  return group;
 }
 
 function bodyThree(body: Body, date: Date) {
@@ -1550,6 +1798,16 @@ function sampleEven<T>(list: T[], count: number) {
   const out: T[] = [];
   for (let i = 0; i < count; i += 1) out.push(list[Math.floor(i * step)]!);
   return out;
+}
+
+function pickScience(list: RawSat[]) {
+  const featured: RawSat[] = [];
+  const rest: RawSat[] = [];
+  for (const sat of list) {
+    if (missionOf(sat.name) || isFlagship(sat.name)) featured.push(sat);
+    else rest.push(sat);
+  }
+  return [...featured, ...sampleEven(rest, 12)];
 }
 
 async function fetchText(url: string, ms = 12000) {
@@ -1757,7 +2015,7 @@ function solidTexture(hex: number) {
 function makeStars(count: number) {
   const pos = new Float32Array(count * 3);
   for (let i = 0; i < count; i += 1) {
-    const r = 70 + Math.random() * 30;
+    const r = 980 + Math.random() * 280;
     const theta = 2 * Math.PI * Math.random();
     const phi = Math.acos(2 * Math.random() - 1);
     pos[i * 3] = r * Math.sin(phi) * Math.cos(theta);

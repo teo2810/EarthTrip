@@ -20,6 +20,7 @@ export type Flags = {
   leoOrbits: boolean;
   meoOrbits: boolean;
   geoOrbits: boolean;
+  astro: boolean;
 };
 
 export const DEFAULT_FLAGS: Flags = {
@@ -40,6 +41,7 @@ export const DEFAULT_FLAGS: Flags = {
   leoOrbits: true,
   meoOrbits: false,
   geoOrbits: true,
+  astro: false,
 };
 
 export type Selection =
@@ -86,5 +88,6 @@ export type Telemetry = {
   surfaceAlpha: number;
   surfaceLock: boolean;
   follow: boolean;
+  view: "globe" | "moon" | "surface" | "iss";
   selection: Selection | null;
 };

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Globe2, Map, Moon, Satellite, SlidersHorizontal, X } from "lucide-react";
+import { Axis3d, Globe2, Map, Moon, Satellite, SlidersHorizontal, X } from "lucide-react";
 import { DEFAULT_FLAGS, type EarthApi, type Flags, type Telemetry } from "@/earth/types";
 
 const EMPTY: Telemetry = {
@@ -15,6 +15,7 @@ const EMPTY: Telemetry = {
   surfaceAlpha: 0,
   surfaceLock: false,
   follow: false,
+  view: "globe",
   selection: null,
 };
 
@@ -233,25 +234,30 @@ export function EarthTrip() {
       ) : null}
 
       <nav className="et-dock" aria-label="Navigazione missione">
-        <button type="button" className={tel.follow ? "et-btn is-on" : "et-btn"} onClick={() => apiRef.current?.goIss()}>
+        <button type="button" className={tel.view === "iss" ? "et-btn is-on" : "et-btn"} aria-pressed={tel.view === "iss"} onClick={() => apiRef.current?.goIss()}>
           <Satellite />
           ISS
         </button>
-        <button type="button" className="et-btn" onClick={() => apiRef.current?.goMoon()}>
+        <button type="button" className={tel.view === "moon" ? "et-btn is-on" : "et-btn"} aria-pressed={tel.view === "moon"} onClick={() => apiRef.current?.goMoon()}>
           <Moon />
           Luna
         </button>
-        <button type="button" className="et-btn" onClick={() => apiRef.current?.goGlobal()}>
+        <button type="button" className={tel.view === "globe" ? "et-btn is-on" : "et-btn"} aria-pressed={tel.view === "globe"} onClick={() => apiRef.current?.goGlobal()}>
           <Globe2 />
           Globale
         </button>
         <button
           type="button"
-          className={tel.surfaceLock ? "et-btn is-on" : "et-btn"}
+          className={tel.view === "surface" ? "et-btn is-on" : "et-btn"}
+          aria-pressed={tel.view === "surface"}
           onClick={() => apiRef.current?.goSurface()}
         >
           <Map />
           Superficie
+        </button>
+        <button type="button" className={flags.astro ? "et-btn is-on" : "et-btn"} aria-pressed={flags.astro} onClick={() => toggle("astro")}>
+          <Axis3d />
+          Astro
         </button>
         <button
           type="button"
@@ -299,6 +305,7 @@ export function EarthTrip() {
             <Switch label="Atmosfera" on={flags.atmosphere} onClick={() => toggle("atmosphere")} />
             <Switch label="Nubi" on={flags.clouds} onClick={() => toggle("clouds")} />
             <Switch label="Luci notturne" on={flags.nightLights} onClick={() => toggle("nightLights")} />
+            <Switch label="Visione astronomica" on={flags.astro} onClick={() => toggle("astro")} />
           </div>
           <label className="et-slider">
             <p>Offset temporale {hours > 0 ? `+${hours}` : hours} h</p>
@@ -367,7 +374,7 @@ export function EarthTrip() {
           <Switch label="Crateri e Apollo" on={flags.moonSites} onClick={() => toggle("moonSites")} />
           <Switch label="Distanza lunare reale" on={flags.trueMoon} onClick={() => toggle("trueMoon")} />
           <p className="et-note">
-            I mari compaiono avvicinandoti. Crateri e siti Apollo solo con lo zoom stretto.
+            Da lontano un filo chiaro segna il disco della Luna. Astro aggiunge asse, equatore e rotazione.
             {tel.moonDistKm > 0 ? ` Luna ${Math.round(tel.moonDistKm).toLocaleString("it-IT")} km.` : ""}
           </p>
         </Accordion>
