@@ -79,6 +79,7 @@ export type EarthApi = {
   getDefenseState: () => any;
   buyDefenseUpgrade: (type: string) => boolean;
   triggerLunarPulse: () => void;
+  retryDefense: () => void;
 };
 
 export type Telemetry = {
@@ -114,4 +115,5 @@ export type DefenseApi = {
   };
   buyDefenseUpgrade: (type: string) => boolean;
   triggerLunarPulse: () => void;
+  retryDefense: () => void;
 };

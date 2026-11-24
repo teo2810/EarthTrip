@@ -25,6 +25,7 @@ export type DefenseState = {
   cannonCount: number;
   weaponType: WeaponId;
   levels: Record<WeaponId, number>;
+  over: boolean;
 };
 
 type Enemy = { mesh: THREE.Mesh; speed: number; hp: number };
@@ -47,6 +48,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
     cannonCount: 1,
     weaponType: "base",
     levels: { base: 1, mg: 0, multi: 0, homing: 0 },
+    over: false,
   };
 
   const cannons: THREE.Group[] = [];
@@ -452,6 +454,8 @@ export function createDefenseMode(hooks: DefenseHooks) {
     syncCannons();
     updateAimGfx();
 
+    if (state.over) return;
+
     spawnTimer += dt;
     waveTimer += dt;
     if (waveTimer > 22) {
@@ -479,13 +483,16 @@ export function createDefenseMode(hooks: DefenseHooks) {
         continue;
       }
       if (e.mesh.position.length() < 1.2) {
-        state.earthHP -= 8 + state.wave;
+        state.earthHP = Math.max(0, state.earthHP - (6 + state.wave));
         burst(e.mesh.position, 0xff5533, 16);
         hooks.getScene().remove(e.mesh);
         enemies.splice(i, 1);
         if (state.earthHP <= 0) {
-          state.earthHP = 0;
-          exit();
+          state.over = true;
+          for (const left of enemies) hooks.getScene().remove(left.mesh);
+          for (const shot of projectiles) hooks.getScene().remove(shot.mesh);
+          enemies.length = 0;
+          projectiles.length = 0;
           return;
         }
       }
@@ -599,6 +606,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
     state.cannonCount = 1;
     state.weaponType = "base";
     state.levels = { base: 1, mg: 0, multi: 0, homing: 0 };
+    state.over = false;
     spawnTimer = 0.4;
     fireCooldown = 0.2;
     waveTimer = 0;
@@ -639,8 +647,29 @@ export function createDefenseMode(hooks: DefenseHooks) {
     hooks.restoreSim();
   }
 
+  function retry() {
+    if (phase !== "play") return;
+    for (const e of enemies) hooks.getScene().remove(e.mesh);
+    for (const p of projectiles) hooks.getScene().remove(p.mesh);
+    enemies.length = 0;
+    projectiles.length = 0;
+    state.over = false;
+    state.earthHP = 100;
+    state.wave = 1;
+    state.exp = 40;
+    state.score = 0;
+    state.lunarEnergy = 0;
+    state.cannonCount = 1;
+    state.weaponType = "base";
+    state.levels = { base: 1, mg: 0, multi: 0, homing: 0 };
+    spawnTimer = 0.6;
+    waveTimer = 0;
+    arcProgress = -1;
+    syncCannons();
+  }
+
   function buyUpgrade(type: string) {
-    if (phase !== "play") return false;
+    if (phase !== "play" || state.over) return false;
     if (type === "cannon") {
       const cost = slotCost("cannon");
       if (!cost || state.exp < cost) return false;
@@ -683,6 +712,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
     onPointerUp,
     lunarShockwave,
     buyUpgrade,
+    retry,
     holdsCamera,
     snapshot,
   };

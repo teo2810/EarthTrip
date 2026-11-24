@@ -569,6 +569,7 @@ function DefenseHud({
     lunarEnergy: number;
     highscore: number;
     slots: DefenseSlot[];
+    over?: boolean;
   };
   api: { current: EarthApi | null };
 }) {
@@ -585,11 +586,16 @@ function DefenseHud({
   return (
     <div className="et-def-hud">
       <div className="et-def-stats">
-        <span>Onda {state.wave}</span>
+        <span>{state.over ? "Terra colpita" : `Onda ${state.wave}`}</span>
         <span className="et-def-hp"><i style={{ width: `${Math.max(0, Math.min(100, state.earthHP))}%` }} /></span>
         <span>HP {Math.round(state.earthHP)}</span>
         <span>EXP {Math.floor(state.exp)}</span>
         <span>Rec {state.highscore}</span>
+        {state.over ? (
+          <button type="button" className="et-def-retry" onClick={() => api.current?.retryDefense()}>
+            Riprova
+          </button>
+        ) : null}
       </div>
       <div className="et-def-row">
         <button

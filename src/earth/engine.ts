@@ -1605,6 +1605,7 @@ export function mountEarth(
     getDefenseState: () => defense.snapshot(),
     buyDefenseUpgrade: (type: string) => defense.buyUpgrade(type),
     triggerLunarPulse: () => defense.lunarShockwave(),
+    retryDefense: () => defense.retry(),
   };
 }
 
