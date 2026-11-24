@@ -57,11 +57,12 @@ export function EarthTrip() {
     cannonCount: 1,
     weaponType: "base" as "base" | "mg" | "multi" | "homing",
     levels: { base: 1, mg: 0, multi: 0, homing: 0 },
-    slots: [] as { id: string; level: number; cost: number; owned: boolean; selected: boolean }[],
+    slots: [] as { id: string; level: number; cost: number; owned: boolean; selected: boolean; action: "buy" | "upgrade" | "select" | "max"; affordable: boolean }[],
     phase: "play",
     flash: 0,
     veil: 0,
     over: false,
+    zoom: 0.11,
   });
 
   useEffect(() => {
@@ -191,7 +192,12 @@ export function EarthTrip() {
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.6"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="currentColor" strokeWidth="1.6"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/></svg>
         {defenseActive ? "Esci" : "Difendi la Terra"}
       </button>
-      {defenseActive && defenseState.phase !== "boom" && defenseState.phase !== "exit" ? <DefenseHud state={defenseState} api={apiRef} /> : null}
+      {defenseActive && defenseState.phase !== "boom" && defenseState.phase !== "exit" ? (
+        <>
+          <ZoomRail value={defenseState.zoom ?? 0.11} onChange={(t) => apiRef.current?.setDefenseZoom(t)} />
+          <DefenseHud state={defenseState} api={apiRef} />
+        </>
+      ) : null}
       {defenseActive && defenseState.flash > 0.02 ? <div className="et-def-flash" style={{ opacity: defenseState.flash }} /> : null}
       {defenseActive && defenseState.veil > 0.02 ? <div className="et-def-veil" style={{ opacity: defenseState.veil }} /> : null}
       {gameOver ? (
@@ -538,7 +544,15 @@ function fmtLon(lon: number) {
   return `${Math.abs(x).toFixed(1)}°${x >= 0 ? "E" : "W"}`;
 }
 
-type DefenseSlot = { id: string; level: number; cost: number; owned: boolean; selected: boolean };
+type DefenseSlot = {
+  id: string;
+  level: number;
+  cost: number;
+  owned: boolean;
+  selected: boolean;
+  action?: "buy" | "upgrade" | "select" | "max";
+  affordable?: boolean;
+};
 
 function IconSingle() {
   return (
@@ -600,6 +614,49 @@ const SLOT_ICON: Record<string, () => ReactNode> = {
   cannon: IconTurret,
 };
 
+function ZoomRail({ value, onChange }: { value: number; onChange: (t: number) => void }) {
+  const track = useRef<HTMLDivElement>(null);
+  const drag = useRef(false);
+  function apply(clientY: number) {
+    const el = track.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const t = Math.min(1, Math.max(0, (clientY - rect.top) / Math.max(1, rect.height)));
+    onChange(1 - t);
+  }
+  return (
+    <div className="et-zoom">
+      <span>Largo</span>
+      <div
+        className="et-zoom-track"
+        ref={track}
+        role="slider"
+        aria-label="Zoom tattico"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(value * 100)}
+        onPointerDown={(e) => {
+          drag.current = true;
+          e.currentTarget.setPointerCapture(e.pointerId);
+          apply(e.clientY);
+        }}
+        onPointerMove={(e) => {
+          if (drag.current) apply(e.clientY);
+        }}
+        onPointerUp={() => {
+          drag.current = false;
+        }}
+        onPointerCancel={() => {
+          drag.current = false;
+        }}
+      >
+        <i style={{ top: `${(1 - value) * 100}%` }} />
+      </div>
+      <span>Vicino</span>
+    </div>
+  );
+}
+
 function DefenseHud({
   state,
   api,
@@ -619,11 +676,11 @@ function DefenseHud({
   const slots = state.slots.length
     ? state.slots
     : [
-        { id: "base", level: 1, cost: 0, owned: true, selected: true },
-        { id: "mg", level: 0, cost: 90, owned: false, selected: false },
-        { id: "multi", level: 0, cost: 140, owned: false, selected: false },
-        { id: "homing", level: 0, cost: 200, owned: false, selected: false },
-        { id: "cannon", level: 1, cost: 70, owned: true, selected: false },
+        { id: "base", level: 1, cost: 55, owned: true, selected: true, action: "upgrade", affordable: false },
+        { id: "mg", level: 0, cost: 90, owned: false, selected: false, action: "buy", affordable: false },
+        { id: "multi", level: 0, cost: 140, owned: false, selected: false, action: "buy", affordable: false },
+        { id: "homing", level: 0, cost: 200, owned: false, selected: false, action: "buy", affordable: false },
+        { id: "cannon", level: 1, cost: 70, owned: true, selected: false, action: "buy", affordable: false },
       ];
   return (
     <div className="et-def-hud">
@@ -656,16 +713,34 @@ function DefenseHud({
         <div className="et-def-slots">
           {slots.map((slot) => {
             const Icon = SLOT_ICON[slot.id] ?? IconSingle;
-            const label = !slot.owned ? `${slot.cost}` : slot.cost > 0 && slot.selected ? `Lv${slot.level} · ${slot.cost}` : `Lv${slot.level}`;
+            const action = slot.action ?? (slot.owned ? "select" : "buy");
+            const affordable = slot.affordable ?? (slot.cost <= 0 || slot.cost <= state.exp);
+            const poor = !affordable && action !== "max" && action !== "select";
+            const cls = [
+              "et-def-slot",
+              slot.selected ? "is-on" : "",
+              action === "max" ? "is-max" : "",
+              affordable && (action === "buy" || action === "upgrade") ? "is-buy" : "",
+              poor ? "is-poor" : "",
+            ]
+              .filter(Boolean)
+              .join(" ");
             return (
               <button
                 key={slot.id}
                 type="button"
-                className={slot.selected ? "et-def-slot is-on" : slot.owned ? "et-def-slot" : "et-def-slot is-locked"}
+                className={cls}
+                disabled={poor || action === "max"}
                 onClick={() => api.current?.buyDefenseUpgrade(slot.id === "cannon" ? "cannon" : `weapon-${slot.id}`)}
               >
                 <Icon />
-                <small>{label}</small>
+                <small>Liv. {slot.level}</small>
+                {action === "max" ? <b>MAX</b> : action === "select" ? <b>USA</b> : (
+                  <>
+                    <em>{slot.cost}</em>
+                    <b>{action === "upgrade" ? "UPGRADE" : "ACQUISTA"}</b>
+                  </>
+                )}
               </button>
             );
           })}

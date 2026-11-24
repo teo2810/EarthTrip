@@ -82,7 +82,6 @@ export function createDefenseMode(hooks: DefenseHooks) {
   let cross: THREE.Group | null = null;
   let arcProgress = -1;
   let zoom = 1;
-  let pinchDist = 0;
   let boomT = 0;
   let flash = 0;
   let veil = 0;
@@ -118,10 +117,14 @@ export function createDefenseMode(hooks: DefenseHooks) {
     return Math.max(6.6, viewZ(cam) * limit * 0.9);
   }
 
-  function onWheel(deltaY: number) {
+  function setZoom01(t: number) {
     if (phase === "idle" || phase === "exit" || phase === "boom") return;
-    const dy = THREE.MathUtils.clamp(deltaY, -180, 180);
-    zoom = THREE.MathUtils.clamp(zoom * Math.exp(dy * 0.00145), ZOOM_MIN, ZOOM_MAX);
+    const k = THREE.MathUtils.clamp(t, 0, 1);
+    zoom = ZOOM_MIN + k * (ZOOM_MAX - ZOOM_MIN);
+  }
+
+  function zoom01() {
+    return THREE.MathUtils.clamp((zoom - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN), 0, 1);
   }
 
   function slotCost(id: WeaponId | "cannon") {
@@ -130,6 +133,23 @@ export function createDefenseMode(hooks: DefenseHooks) {
     if (lv <= 0) return UNLOCK[id];
     if (state.weaponType === id && lv < 5) return 55 * lv;
     return 0;
+  }
+
+  function slotMeta(id: WeaponId | "cannon") {
+    const cost = slotCost(id);
+    const level = id === "cannon" ? state.cannonCount : state.levels[id];
+    const owned = id === "cannon" || level > 0;
+    const selected = id !== "cannon" && state.weaponType === id;
+    const maxed = id === "cannon" ? state.cannonCount >= 6 : owned && selected && level >= 5;
+    const action: "buy" | "upgrade" | "select" | "max" = maxed
+      ? "max"
+      : id === "cannon" || !owned
+        ? "buy"
+        : !selected
+          ? "select"
+          : "upgrade";
+    const affordable = action === "select" || (action !== "max" && cost > 0 && state.exp >= cost);
+    return { id, level, cost, owned, selected, action, affordable };
   }
 
   function snapshot() {
@@ -141,13 +161,8 @@ export function createDefenseMode(hooks: DefenseHooks) {
       flash,
       veil,
       finale,
-      slots: ids.map((id) => ({
-        id,
-        level: id === "cannon" ? state.cannonCount : state.levels[id],
-        cost: slotCost(id),
-        owned: id === "cannon" || state.levels[id] > 0,
-        selected: id !== "cannon" && state.weaponType === id,
-      })),
+      zoom: zoom01(),
+      slots: ids.map((id) => slotMeta(id)),
     };
   }
 
@@ -742,16 +757,6 @@ export function createDefenseMode(hooks: DefenseHooks) {
   }
 
   function onPointer(e: PointerEvent | TouchEvent) {
-    if (phase !== "play" && phase !== "enter") return;
-    if ("touches" in e && e.touches.length >= 2) {
-      const dx = e.touches[0].clientX - e.touches[1].clientX;
-      const dy = e.touches[0].clientY - e.touches[1].clientY;
-      const dist = Math.hypot(dx, dy) || 1;
-      if (pinchDist > 0) zoom = THREE.MathUtils.clamp(zoom * (pinchDist / dist), ZOOM_MIN, ZOOM_MAX);
-      pinchDist = dist;
-      return;
-    }
-    pinchDist = 0;
     if (phase !== "play" || state.over) return;
     if (!readPointer(e)) return;
     if (!raycaster.ray.intersectPlane(plane, hit)) return;
@@ -762,7 +767,6 @@ export function createDefenseMode(hooks: DefenseHooks) {
   }
 
   function onPointerUp(e: PointerEvent) {
-    pinchDist = 0;
     if (phase !== "play" || state.lunarEnergy < 100) return;
     if (!readPointer(e)) return;
     const moon = hooks.getMoon();
@@ -788,7 +792,6 @@ export function createDefenseMode(hooks: DefenseHooks) {
     flash = 0;
     veil = 0;
     zoom = 1;
-    pinchDist = 0;
     spawnTimer = 0.4;
     fireCooldown = 0.2;
     waveTimer = 0;
@@ -894,7 +897,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
     update,
     onPointer,
     onPointerUp,
-    onWheel,
+    setZoom01,
     lunarShockwave,
     buyUpgrade,
     retry,

@@ -456,15 +456,9 @@ export function mountEarth(
   });
 
   const onPointerMove = (e: PointerEvent | TouchEvent) => defense.onPointer(e);
-  const onWheel = (e: WheelEvent) => {
-    if (!defense.holdsCamera()) return;
-    e.preventDefault();
-    defense.onWheel(e.deltaY);
-  };
   canvas.addEventListener("pointermove", onPointerMove);
   canvas.addEventListener("pointerdown", onPointerMove);
   canvas.addEventListener("touchmove", onPointerMove, { passive: true });
-  canvas.addEventListener("wheel", onWheel, { passive: false });
   moonMesh.scale.set(1, 1, 1);
   moonPivot.add(moonMesh);
   const limbPts: THREE.Vector3[] = [];
@@ -1546,7 +1540,6 @@ export function mountEarth(
     canvas.removeEventListener("pointermove", onPointerMove);
     canvas.removeEventListener("pointerdown", onPointerMove);
     canvas.removeEventListener("touchmove", onPointerMove);
-    canvas.removeEventListener("wheel", onWheel);
     controls.dispose();
     map?.remove();
     clearSats();
@@ -1619,6 +1612,7 @@ export function mountEarth(
     buyDefenseUpgrade: (type: string) => defense.buyUpgrade(type),
     triggerLunarPulse: () => defense.lunarShockwave(),
     retryDefense: () => defense.retry(),
+    setDefenseZoom: (t: number) => defense.setZoom01(t),
   };
 }
 
