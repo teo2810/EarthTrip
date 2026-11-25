@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { BALANCE, cooldownMult, damageMult, levelCost, turretPrice, type GunId, type TurretKind, type WarheadId } from "./defense-balance";
 
 export type DefenseHooks = {
   getEarth: () => THREE.Object3D;
@@ -12,11 +13,8 @@ export type DefenseHooks = {
   restoreSim: () => void;
 };
 
-export type WeaponId = "base" | "mg" | "multi" | "homing";
-
-export type MissileId = "cluster" | "limited" | "slow" | "homing";
-export type MainGun = "singolo" | "raffica" | "mitra" | "rosa";
-export type AutoMode = "singolo" | "doppio" | "bombe";
+export type MainGun = GunId;
+export type MissileId = WarheadId;
 export type RunLog = { score: number; wave: number; at: number };
 
 export type DefenseState = {
@@ -27,20 +25,18 @@ export type DefenseState = {
   score: number;
   lunarEnergy: number;
   highscore: number;
-  cannonCount: number;
-  weaponType: WeaponId;
-  levels: Record<WeaponId, number>;
   over: boolean;
-  fireLevel: number;
-  spread: number;
-  pods: number;
-  missile: MissileId | "none";
+  missile: MissileId;
   ownedMissiles: Record<MissileId, boolean>;
   shield: number;
   freezeCharges: number;
   freezeLeft: number;
   mainGun: MainGun;
-  autoMode: AutoMode;
+  gunLevels: Record<MainGun, number>;
+  turretRate: number;
+  turretCalibre: number;
+  missileReload: number;
+  missileRadius: number;
   cleared: number;
   bestCleared: number;
   bestRun: RunLog | null;
@@ -48,8 +44,35 @@ export type DefenseState = {
   shop: boolean;
   shopKind: "wave" | "freeze" | null;
   guide: boolean;
-  ownedGuns: Record<MainGun, boolean>;
-  ownedAmmo: Record<AutoMode, boolean>;
+};
+
+/** Partita salvata a fine ondata, per riprendere dopo un ricarica. */
+type RunSave = {
+  wave: number;
+  earthHP: number;
+  exp: number;
+  score: number;
+  lunarEnergy: number;
+  shield: number;
+  cleared: number;
+  mainGun: MainGun;
+  gunLevels: Record<MainGun, number>;
+  turrets: { kind: TurretKind; angle: number }[];
+  turretRate: number;
+  turretCalibre: number;
+  missile: MissileId;
+  ownedMissiles: Record<MissileId, boolean>;
+  missileReload: number;
+  missileRadius: number;
+};
+
+type SaveFile = {
+  v: 2;
+  highscore: number;
+  best: RunLog | null;
+  last: RunLog | null;
+  bestCleared: number;
+  run: RunSave | null;
 };
 
 type Enemy = {
@@ -60,12 +83,15 @@ type Enemy = {
   boss: boolean;
   radius: number;
   mode: "in" | "strafe" | "blink";
+  /** Pausa tra due urti del boss contro la Luna. */
   modeT: number;
   strafe: number;
   shotT: number;
   slow: number;
+  /** Il boss diventa colpibile solo dopo essere entrato del tutto nello schermo. */
+  entering: number;
 };
-type ShotKind = "bolt" | "bomb" | MissileId;
+type ShotKind = "bolt" | "bomb" | "msingle" | "rada" | "grappolo" | "ricerca" | "termobarica";
 type Shot = {
   mesh: THREE.Mesh;
   vel: THREE.Vector3;
@@ -75,6 +101,8 @@ type Shot = {
   traveled: number;
   range: number;
   pierce: number;
+  blast: number;
+  blastDmg: number;
 };
 type Spark = { mesh: THREE.Mesh; vel: THREE.Vector3; life: number };
 type Shard = { mesh: THREE.Mesh; vel: THREE.Vector3; spin: THREE.Vector3 };
@@ -84,36 +112,98 @@ type Hostile = { mesh: THREE.Mesh; vel: THREE.Vector3; hp: number };
 
 const RIM = 1.1;
 const MOON_ORBIT = 2.48;
-const ZOOM_MIN = 0.62;
-const ZOOM_MAX = 4.1;
-const MISSILES: MissileId[] = ["cluster", "limited", "slow", "homing"];
-const MISSILE_COST: Record<MissileId, number> = { cluster: 80, limited: 130, slow: 170, homing: 260 };
-const GUN_COST: Record<Exclude<MainGun, "singolo">, number> = { raffica: 70, mitra: 120, rosa: 160 };
-const AMMO_COST: Record<Exclude<AutoMode, "singolo">, number> = { doppio: 90, bombe: 140 };
-const CONE_CANNON = (10 * Math.PI) / 180;
-const CONE_MISSILE = (2 * Math.PI) / 180;
-const MAX_TURRETS = 6;
+const GUNS: MainGun[] = ["singolo", "doppio", "mitra", "rosa"];
+const MISSILES: MissileId[] = ["singolo", "rada", "grappolo", "ricerca", "termobarica"];
 const HIST_KEY = "earthtrip-defense-log";
+const SAVE_KEY = "earthtrip-defense-save";
+/** Metà del lato corto inquadrato, in unità di gioco: zoom vicino e zoom largo. */
+const VIEW_NEAR = 3.05;
+const VIEW_FAR = 8.6;
+const BOSS_WARN = 1.6;
 
-function loadLog(): { best: RunLog | null; last: RunLog | null; bestCleared: number } {
-  try {
-    const raw = JSON.parse(localStorage.getItem(HIST_KEY) || "null") as {
-      best?: RunLog;
-      last?: RunLog;
-      bestCleared?: number;
-    } | null;
-    const hs = parseInt(localStorage.getItem("earthtrip-hs") || "0", 10) || 0;
-    const best = raw?.best && typeof raw.best.score === "number" ? raw.best : hs > 0 ? { score: hs, wave: 1, at: 0 } : null;
-    const last = raw?.last && typeof raw.last.score === "number" ? raw.last : null;
-    const bestCleared = typeof raw?.bestCleared === "number" ? raw.bestCleared : 0;
-    return { best, last, bestCleared };
-  } catch {
-    return { best: null, last: null, bestCleared: 0 };
+const noMissiles = (): Record<MissileId, boolean> => ({ singolo: true, rada: false, grappolo: false, ricerca: false, termobarica: false });
+const startGuns = (): Record<MainGun, number> => ({ singolo: 1, doppio: 0, mitra: 0, rosa: 0 });
+const lvl = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.min(BALANCE.maxLevel, Math.floor(v))) : 0);
+const isLog = (v: unknown): v is RunLog => !!v && typeof (v as RunLog).score === "number";
+
+/** Vecchi nomi delle armi (fino alla v17) verso i nuovi. */
+const OLD_GUN: Record<string, MainGun> = { singolo: "singolo", raffica: "doppio", doppio: "doppio", mitra: "mitra", rosa: "rosa" };
+const OLD_MISSILE: Record<string, MissileId> = { none: "singolo", singolo: "singolo", limited: "singolo", slow: "rada", rada: "rada", cluster: "grappolo", grappolo: "grappolo", homing: "ricerca", ricerca: "ricerca", termobarica: "termobarica" };
+
+function migrateRun(raw: unknown): RunSave | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.wave !== "number" || r.wave < 1) return null;
+  const gunLevels = startGuns();
+  const gl = (r.gunLevels ?? {}) as Record<string, unknown>;
+  const og = (r.ownedGuns ?? {}) as Record<string, unknown>;
+  for (const [k, v] of Object.entries({ ...og, ...gl })) {
+    const id = OLD_GUN[k];
+    if (!id) continue;
+    gunLevels[id] = Math.max(gunLevels[id], v === true ? 1 : lvl(v));
   }
+  gunLevels.singolo = Math.max(1, gunLevels.singolo);
+  const ownedMissiles = noMissiles();
+  for (const [k, v] of Object.entries((r.ownedMissiles ?? {}) as Record<string, unknown>)) {
+    const id = OLD_MISSILE[k];
+    if (id && v) ownedMissiles[id] = true;
+  }
+  const mg = OLD_GUN[String(r.mainGun)] ?? "singolo";
+  const ms = OLD_MISSILE[String(r.missile)] ?? "singolo";
+  const turrets = (Array.isArray(r.turrets) ? r.turrets : [])
+    .filter((t): t is { kind: string; angle: number } => !!t && typeof t.angle === "number")
+    .map((t) => ({ kind: (t.kind === "missile" || t.kind === "mortar" ? t.kind : "cannon") as TurretKind, angle: t.angle }))
+    .slice(0, BALANCE.turrets.max);
+  const num = (v: unknown, d: number) => (typeof v === "number" && Number.isFinite(v) ? v : d);
+  return {
+    wave: Math.floor(r.wave),
+    earthHP: Math.max(1, Math.min(100, num(r.earthHP, 100))),
+    exp: Math.max(0, num(r.exp, 0)),
+    score: Math.max(0, num(r.score, 0)),
+    lunarEnergy: Math.max(0, Math.min(100, num(r.lunarEnergy, 0))),
+    shield: Math.max(0, Math.min(3, num(r.shield, 0))),
+    cleared: Math.max(0, num(r.cleared, 0)),
+    mainGun: gunLevels[mg] > 0 ? mg : "singolo",
+    gunLevels,
+    turrets,
+    turretRate: lvl(r.turretRate),
+    turretCalibre: lvl(r.turretCalibre),
+    missile: ownedMissiles[ms] ? ms : "singolo",
+    ownedMissiles,
+    missileReload: lvl(r.missileReload),
+    missileRadius: lvl(r.missileRadius),
+  };
+}
+
+/**
+ * Legge il salvataggio. Se c'è solo il formato vecchio (record in "earthtrip-hs"
+ * e storico in "earthtrip-defense-log"), lo converte senza perdere nulla.
+ */
+export function loadSave(): SaveFile {
+  const hs = parseInt(localStorage.getItem("earthtrip-hs") || "0", 10) || 0;
+  let log: { best?: unknown; last?: unknown; bestCleared?: unknown } | null = null;
+  try {
+    log = JSON.parse(localStorage.getItem(HIST_KEY) || "null");
+  } catch {
+    log = null;
+  }
+  let file: Partial<SaveFile> & { run?: unknown } = {};
+  try {
+    file = JSON.parse(localStorage.getItem(SAVE_KEY) || "null") || {};
+  } catch {
+    file = {};
+  }
+  const pick = (a: unknown, b: unknown) => (isLog(a) && isLog(b) ? (a.score >= b.score ? a : b) : isLog(a) ? a : isLog(b) ? b : null);
+  const best = pick(file.best, log?.best) ?? (hs > 0 ? { score: hs, wave: 1, at: 0 } : null);
+  const last = isLog(file.last) ? file.last : isLog(log?.last) ? log.last : null;
+  const bestCleared = Math.max(typeof file.bestCleared === "number" ? file.bestCleared : 0, typeof log?.bestCleared === "number" ? log.bestCleared : 0);
+  const highscore = Math.max(hs, typeof file.highscore === "number" ? file.highscore : 0, best?.score ?? 0);
+  return { v: 2, highscore, best, last, bestCleared, run: migrateRun(file.run) };
 }
 
 export function createDefenseMode(hooks: DefenseHooks) {
-  const saved = loadLog();
+  const saved = loadSave();
+  let savedRun: RunSave | null = saved.run;
   const state: DefenseState = {
     active: false,
     wave: 1,
@@ -121,21 +211,19 @@ export function createDefenseMode(hooks: DefenseHooks) {
     exp: 0,
     score: 0,
     lunarEnergy: 0,
-    highscore: Math.max(parseInt(localStorage.getItem("earthtrip-hs") || "0", 10) || 0, saved.best?.score ?? 0),
-    cannonCount: 1,
-    weaponType: "base",
-    levels: { base: 1, mg: 0, multi: 0, homing: 0 },
+    highscore: saved.highscore,
     over: false,
-    fireLevel: 0,
-    spread: 1,
-    pods: 0,
-    missile: "none",
-    ownedMissiles: { cluster: false, limited: false, slow: false, homing: false },
+    missile: "singolo",
+    ownedMissiles: noMissiles(),
     shield: 0,
     freezeCharges: 0,
     freezeLeft: 0,
     mainGun: "singolo",
-    autoMode: "singolo",
+    gunLevels: startGuns(),
+    turretRate: 0,
+    turretCalibre: 0,
+    missileReload: 0,
+    missileRadius: 0,
     cleared: 0,
     bestCleared: saved.bestCleared,
     bestRun: saved.best,
@@ -143,13 +231,12 @@ export function createDefenseMode(hooks: DefenseHooks) {
     shop: false,
     shopKind: null,
     guide: true,
-    ownedGuns: { singolo: true, raffica: false, mitra: false, rosa: false },
-    ownedAmmo: { singolo: true, doppio: false, bombe: false },
   };
 
   const cannons: THREE.Group[] = [];
-  const turrets: { angle: number; kind: "cannon" | "missile"; cd: number; mesh: THREE.Group }[] = [];
-  let place: { kind: "cannon" | "missile"; angle: number } | null = null;
+  type Turret = { angle: number; kind: TurretKind; cd: number; mesh: THREE.Group };
+  const turrets: Turret[] = [];
+  let place: { kind: TurretKind; angle: number } | null = null;
   let ghost: THREE.Group | null = null;
   let placeMsg = "";
   const enemies: Enemy[] = [];
@@ -172,10 +259,8 @@ export function createDefenseMode(hooks: DefenseHooks) {
   let aimAngle = Math.PI / 2;
   let spawnTimer = 0;
   let fireCooldown = 0;
-  let burstLeft = 0;
-  let autoCd = 0.4;
-  let missileCd = 0;
-  let missileCdMax = 2.15;
+  let bossWarn = 0;
+  let bossWarnAngle = 0;
   let trashQuota = 5;
   let trashSpawned = 0;
   let bossSpawned = false;
@@ -189,7 +274,8 @@ export function createDefenseMode(hooks: DefenseHooks) {
   let shieldMesh: THREE.Mesh | null = null;
   let crackGroup: THREE.Group | null = null;
   let arcProgress = -1;
-  let zoom = 1;
+  let zoom = 0.3;
+  let zoomGoal = 0.3;
   let boomT = 0;
   let flash = 0;
   let veil = 0;
@@ -214,23 +300,44 @@ export function createDefenseMode(hooks: DefenseHooks) {
     return phase === "boom" || (phase === "exit" && veil > 0.28);
   }
 
-  function frameDistance(cam: THREE.PerspectiveCamera) {
-    const v = THREE.MathUtils.degToRad(cam.fov) * 0.5;
-    const h = Math.atan(Math.tan(v) * Math.max(0.35, cam.aspect));
-    const limit = Math.min(Math.tan(v), Math.tan(h));
-    return THREE.MathUtils.clamp((MOON_ORBIT + 0.85) / Math.max(0.16, limit), 6.2, 22);
+  /** Tangenti dei semi-angoli di vista, verticale e orizzontale. */
+  function viewTans(cam: THREE.PerspectiveCamera) {
+    const tv = Math.tan(THREE.MathUtils.degToRad(cam.fov) * 0.5);
+    return { tv, th: tv * Math.max(0.35, cam.aspect) };
   }
 
+  /**
+   * Lo zoom (0 vicino, 1 largo) fissa quanto spazio si vede sul lato corto dello schermo,
+   * così telefono verticale e desktop inquadrano sempre Terra, Luna e nemici in modo sensato.
+   */
   function viewZ(cam: THREE.PerspectiveCamera) {
-    return THREE.MathUtils.clamp(frameDistance(cam) * zoom, 5.2, 120);
+    const { tv, th } = viewTans(cam);
+    const half = VIEW_NEAR * (VIEW_FAR / VIEW_NEAR) ** zoom;
+    return THREE.MathUtils.clamp(half / Math.min(tv, th), 5.2, 60);
+  }
+
+  /** Metà larghezza e metà altezza visibili sul piano di gioco. */
+  function viewHalf() {
+    const cam = hooks.getCamera() as THREE.PerspectiveCamera;
+    const { tv, th } = viewTans(cam);
+    const z = Math.max(1, cam.position.z || viewZ(cam));
+    return { w: z * th, h: z * tv };
   }
 
   function visibleRadius() {
-    const cam = hooks.getCamera() as THREE.PerspectiveCamera;
-    const v = THREE.MathUtils.degToRad(cam.fov) * 0.5;
-    const h = Math.atan(Math.tan(v) * Math.max(0.35, cam.aspect));
-    const limit = Math.hypot(Math.tan(v), Math.tan(h));
-    return Math.max(4.8, viewZ(cam) * limit);
+    const v = viewHalf();
+    return Math.max(4.8, Math.hypot(v.w, v.h));
+  }
+
+  /** Vero se il punto è dentro lo schermo, con un margine interno. */
+  function onScreen(p: THREE.Vector3, margin = 0) {
+    const v = viewHalf();
+    return Math.abs(p.x) <= v.w - margin && Math.abs(p.y) <= v.h - margin;
+  }
+
+  /** Nemico colpibile: dentro lo schermo e, se boss, già entrato del tutto. */
+  function targetable(e: Enemy) {
+    return e.entering <= 0 && onScreen(e.mesh.position, e.boss ? e.radius : 0);
   }
 
   function horizon() {
@@ -239,37 +346,30 @@ export function createDefenseMode(hooks: DefenseHooks) {
 
   function setZoom01(t: number) {
     if (phase === "idle" || phase === "exit" || phase === "boom") return;
-    const k = THREE.MathUtils.clamp(t, 0, 1);
-    zoom = ZOOM_MIN + k * (ZOOM_MAX - ZOOM_MIN);
+    zoomGoal = THREE.MathUtils.clamp(t, 0, 1);
   }
 
   function zoom01() {
-    return THREE.MathUtils.clamp((zoom - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN), 0, 1);
+    return zoomGoal;
   }
 
   function freshArcade() {
-    state.fireLevel = 0;
-    state.spread = 1;
-    state.pods = 0;
-    state.missile = "none";
+    state.missile = "singolo";
     state.mainGun = "singolo";
-    state.autoMode = "singolo";
-    state.ownedMissiles = { cluster: false, limited: false, slow: false, homing: false };
-    state.ownedGuns = { singolo: true, raffica: false, mitra: false, rosa: false };
-    state.ownedAmmo = { singolo: true, doppio: false, bombe: false };
+    state.gunLevels = startGuns();
+    state.ownedMissiles = noMissiles();
+    state.turretRate = 0;
+    state.turretCalibre = 0;
+    state.missileReload = 0;
+    state.missileRadius = 0;
     state.shop = false;
     state.shopKind = null;
     state.guide = true;
     state.shield = 0;
     state.freezeCharges = 0;
     state.freezeLeft = 0;
-    state.cannonCount = 1;
-    state.weaponType = "base";
-    state.levels = { base: 1, mg: 0, multi: 0, homing: 0 };
     state.cleared = 0;
-    burstLeft = 0;
-    missileCd = 0;
-    missileCdMax = 1.2;
+    bossWarn = 0;
     place = null;
     placeMsg = "";
     clearGhost();
@@ -277,18 +377,33 @@ export function createDefenseMode(hooks: DefenseHooks) {
     turrets.length = 0;
   }
 
-  function missileBuyable(id: MissileId) {
-    if (id === "homing") {
-      return state.ownedMissiles.cluster && state.ownedMissiles.limited && state.ownedMissiles.slow && state.bestCleared >= 6;
-    }
-    if (id === "limited") return state.bestCleared >= 2;
-    if (id === "slow") return state.bestCleared >= 4;
-    return true;
+
+
+  function gunStats(id: MainGun) {
+    const g = BALANCE.gun[id];
+    const l = Math.max(1, state.gunLevels[id]);
+    return { damage: g.damage * damageMult(g.damagePerLevel, l), cooldown: g.cooldown * cooldownMult(g.ratePerLevel, l), pellets: g.pellets };
   }
 
-  function turretCost(kind: "cannon" | "missile") {
-    const n = turrets.filter((t) => t.kind === kind).length;
-    return kind === "cannon" ? 40 + n * 30 : 55 + n * 35;
+  function turretDamage() {
+    return 1 + BALANCE.turretUpgrades.calibre.perLevel * state.turretCalibre;
+  }
+
+  function turretRate() {
+    return 1 / (1 + BALANCE.turretUpgrades.rate.perLevel * state.turretRate);
+  }
+
+  /** Ricarica effettiva di una testata, in secondi. */
+  function warheadCooldown(id: MissileId) {
+    return BALANCE.missiles[id].cooldown * turretRate() / (1 + BALANCE.missileUpgrades.reload.perLevel * state.missileReload);
+  }
+
+  function warheadRadius(id: MissileId) {
+    return BALANCE.missiles[id].radius * (1 + BALANCE.missileUpgrades.radius.perLevel * state.missileRadius);
+  }
+
+  function turretCost(kind: TurretKind) {
+    return turretPrice(kind, turrets.length);
   }
 
   function angDelta(a: number, b: number) {
@@ -305,10 +420,74 @@ export function createDefenseMode(hooks: DefenseHooks) {
   let previousRun: RunLog | null = null;
 
   function writeLog() {
-    localStorage.setItem(
-      HIST_KEY,
-      JSON.stringify({ best: state.bestRun, last: state.lastRun, bestCleared: state.bestCleared }),
-    );
+    const file: SaveFile = {
+      v: 2,
+      highscore: state.highscore,
+      best: state.bestRun,
+      last: state.lastRun,
+      bestCleared: state.bestCleared,
+      run: savedRun,
+    };
+    try {
+      localStorage.setItem(SAVE_KEY, JSON.stringify(file));
+      localStorage.setItem(HIST_KEY, JSON.stringify({ best: state.bestRun, last: state.lastRun, bestCleared: state.bestCleared }));
+      localStorage.setItem("earthtrip-hs", String(state.highscore));
+    } catch {
+      /* memoria piena o bloccata: si gioca lo stesso */
+    }
+  }
+
+  /** Salva la partita a fine ondata, con livelli, sblocchi e torrette. */
+  function saveRun() {
+    savedRun = {
+      wave: state.wave,
+      earthHP: state.earthHP,
+      exp: state.exp,
+      score: state.score,
+      lunarEnergy: state.lunarEnergy,
+      shield: state.shield,
+      cleared: state.cleared,
+      mainGun: state.mainGun,
+      gunLevels: { ...state.gunLevels },
+      turrets: turrets.map((t) => ({ kind: t.kind, angle: t.angle })),
+      turretRate: state.turretRate,
+      turretCalibre: state.turretCalibre,
+      missile: state.missile,
+      ownedMissiles: { ...state.ownedMissiles },
+      missileReload: state.missileReload,
+      missileRadius: state.missileRadius,
+    };
+    writeLog();
+  }
+
+  function dropRun() {
+    savedRun = null;
+    writeLog();
+  }
+
+  function resumeRun(run: RunSave) {
+    freshArcade();
+    state.wave = run.wave;
+    state.earthHP = run.earthHP;
+    state.exp = run.exp;
+    state.score = run.score;
+    state.lunarEnergy = run.lunarEnergy;
+    state.shield = run.shield;
+    state.cleared = run.cleared;
+    state.gunLevels = { ...run.gunLevels };
+    state.mainGun = run.mainGun;
+    state.turretRate = run.turretRate;
+    state.turretCalibre = run.turretCalibre;
+    state.ownedMissiles = { ...run.ownedMissiles };
+    state.missile = run.missile;
+    state.missileReload = run.missileReload;
+    state.missileRadius = run.missileRadius;
+    for (const t of run.turrets) addTurret(t.kind, t.angle);
+    bossSpawned = true;
+    state.guide = false;
+    state.shop = true;
+    state.shopKind = "wave";
+    syncShield();
   }
 
   function persistRun(force: boolean) {
@@ -330,113 +509,144 @@ export function createDefenseMode(hooks: DefenseHooks) {
     spawnTimer = 0.45;
   }
 
-  type SlotAction = "buy" | "upgrade" | "select" | "max";
-  function shopSlots() {
+  type ShopAction = { id: string; label: string; cost: number | null; disabled: boolean };
+  type ShopCard = {
+    key: string;
+    name: string;
+    icon: string;
+    copy: string;
+    stat: string;
+    level: number | null;
+    max: number;
+    selected: boolean;
+    main: ShopAction | null;
+    side: ShopAction | null;
+  };
+
+  const GUN_NAME: Record<MainGun, string> = { singolo: "Singolo", doppio: "Doppio", mitra: "Mitra", rosa: "Rosa" };
+  const TURRET_NAME: Record<TurretKind, string> = { cannon: "Cannone base", missile: "Lancia-missili", mortar: "Mortaio" };
+  const WARHEAD_NAME: Record<MissileId, string> = { singolo: "Singolo", rada: "Rada", grappolo: "Grappolo", ricerca: "Ricerca", termobarica: "Termobarica" };
+  const fmt = (n: number) => (n >= 10 ? n.toFixed(0) : n.toFixed(1)).replace(".", ",");
+
+  function upAction(id: string, base: number, level: number): ShopAction {
+    const cost = levelCost(base, level);
+    return { id, label: cost == null ? "Max" : level === 0 ? "Compra" : "Liv. +1", cost, disabled: cost == null || state.exp < cost };
+  }
+
+  /** Modello dello shop: ogni card sa già prezzo, livello e se si può comprare. */
+  function shopModel() {
     const exp = state.exp;
-    const fireCost = state.fireLevel === 0 ? 60 : state.fireLevel === 1 ? 120 : 0;
-    const fireName = state.fireLevel === 0 ? "Singolo" : state.fireLevel === 1 ? "Rapido" : "Raffica";
-    const roseCost = state.spread >= 8 ? 0 : 80 + (state.spread - 1) * 90;
-    const podCost = state.pods >= 4 ? 0 : 110 + state.pods * 70;
-    const slots: {
-      id: string;
-      level: number;
-      cost: number;
-      owned: boolean;
-      selected: boolean;
-      action: SlotAction;
-      affordable: boolean;
-      name: string;
-    }[] = [
-      {
-        id: "fire",
-        level: state.fireLevel + 1,
-        cost: fireCost,
-        owned: true,
-        selected: true,
-        action: state.fireLevel >= 2 ? "max" : "upgrade",
-        affordable: fireCost > 0 && exp >= fireCost,
-        name: fireName,
-      },
-      {
-        id: "rose",
-        level: state.spread,
-        cost: roseCost,
-        owned: true,
-        selected: state.spread > 1,
-        action: state.spread >= 8 ? "max" : "upgrade",
-        affordable: roseCost > 0 && exp >= roseCost,
-        name: state.spread >= 8 ? "Rosa" : `x${state.spread + 1}`,
-      },
-      {
-        id: "pod",
-        level: state.pods,
-        cost: podCost,
-        owned: state.pods > 0,
-        selected: state.pods > 0,
-        action: state.pods >= 4 ? "max" : "buy",
-        affordable: podCost > 0 && exp >= podCost,
-        name: "Lancio",
-      },
-    ];
-    for (const id of MISSILES) {
-      const owned = state.ownedMissiles[id];
-      const cost = owned ? 0 : MISSILE_COST[id];
-      const names: Record<MissileId, string> = {
-        cluster: "Grappolo",
-        limited: "Limite",
-        slow: "Rada",
-        homing: "Ricerca",
+    const shopOpen = state.shop;
+    const guns: ShopCard[] = GUNS.map((id) => {
+      const level = state.gunLevels[id];
+      const st = gunStats(id);
+      const base = BALANCE.gun[id].base;
+      const owned = level > 0;
+      return {
+        key: `gun-${id}`,
+        name: GUN_NAME[id],
+        icon: `gun-${id}`,
+        copy: "",
+        stat: `Danno ${fmt(st.damage * st.pellets)} · ${fmt(1 / st.cooldown)} colpi/s`,
+        level: owned ? level : 0,
+        max: BALANCE.maxLevel,
+        selected: state.mainGun === id,
+        main: owned
+          ? { id: `gun-${id}`, label: state.mainGun === id ? "In uso" : "Usa", cost: null, disabled: state.mainGun === id }
+          : { id: `gun-${id}`, label: "Sblocca", cost: base, disabled: !shopOpen || exp < base },
+        side: owned ? upAction(`up-gun-${id}`, base, level) : null,
       };
-      slots.push({
-        id,
-        level: owned ? 1 : 0,
-        cost,
-        owned,
+    });
+    const full = turrets.length >= BALANCE.turrets.max;
+    const kinds: TurretKind[] = ["cannon", "missile", "mortar"];
+    const towers: ShopCard[] = kinds.map((kind) => {
+      const cost = turretCost(kind);
+      const n = turrets.filter((t) => t.kind === kind).length;
+      return {
+        key: `arm-${kind}`,
+        name: TURRET_NAME[kind],
+        icon: `arm-${kind}`,
+        copy: "",
+        stat: n ? `Ne hai ${n}` : "",
+        level: null,
+        max: 0,
+        selected: false,
+        main: { id: `arm-${kind}`, label: full ? "Pieno" : "Piazza", cost: full ? null : cost, disabled: full || exp < cost },
+        side: null,
+      };
+    });
+    const tu = BALANCE.turretUpgrades;
+    towers.push(
+      {
+        key: "up-rate", name: "Cadenza", icon: "up-rate", copy: "",
+        stat: `Ricarica torrette ×${turretRate().toFixed(2).replace(".", ",")}`,
+        level: state.turretRate, max: BALANCE.maxLevel, selected: false, main: null,
+        side: upAction("up-rate", tu.rate.base, state.turretRate),
+      },
+      {
+        key: "up-cal", name: "Calibro", icon: "up-cal", copy: "",
+        stat: `Danno torrette ×${turretDamage().toFixed(2).replace(".", ",")}`,
+        level: state.turretCalibre, max: BALANCE.maxLevel, selected: false, main: null,
+        side: upAction("up-cal", tu.calibre.base, state.turretCalibre),
+      },
+    );
+    const mu = BALANCE.missileUpgrades;
+    const warheads: ShopCard[] = MISSILES.map((id) => {
+      const owned = state.ownedMissiles[id];
+      const cost = BALANCE.missiles[id].cost;
+      const r = warheadRadius(id);
+      return {
+        key: `wh-${id}`,
+        name: WARHEAD_NAME[id],
+        icon: `wh-${id}`,
+        copy: "",
+        stat: `Ricarica ${fmt(warheadCooldown(id))} s${r > 0 ? ` · raggio ${fmt(r)}` : ""}`,
+        level: null,
+        max: 0,
         selected: state.missile === id,
-        action: owned ? "select" : "buy",
-        affordable: owned || exp >= cost,
-        name: names[id],
-      });
-    }
-    slots.push({
-      id: "shield",
-      level: state.shield,
-      cost: state.shield > 0 ? 0 : 80,
-      owned: state.shield > 0,
-      selected: state.shield > 0,
-      action: state.shield > 0 ? "max" : "buy",
-      affordable: state.shield <= 0 && exp >= 80,
-      name: "Scudo",
+        main: owned
+          ? { id: `wh-${id}`, label: state.missile === id ? "In uso" : "Usa", cost: null, disabled: state.missile === id }
+          : { id: `wh-${id}`, label: "Sblocca", cost, disabled: exp < cost },
+        side: null,
+      };
     });
-    const freezeCost = state.freezeCharges > 0 ? 0 : 130;
-    slots.push({
-      id: "freeze",
-      level: state.freezeCharges,
-      cost: freezeCost,
-      owned: state.freezeCharges > 0 || state.freezeLeft > 0,
-      selected: state.freezeLeft > 0,
-      action: state.freezeCharges > 0 ? "select" : "buy",
-      affordable: state.freezeCharges > 0 || exp >= 130,
-      name: "Gelo",
-    });
-    return slots;
+    warheads.push(
+      {
+        key: "up-reload", name: "Ricarica rapida", icon: "up-reload", copy: "",
+        stat: `Ricarica missili −${Math.round((1 - 1 / (1 + mu.reload.perLevel * state.missileReload)) * 100)}%`,
+        level: state.missileReload, max: BALANCE.maxLevel, selected: false, main: null,
+        side: upAction("up-reload", mu.reload.base, state.missileReload),
+      },
+      {
+        key: "up-radius", name: "Raggio esplosione", icon: "up-radius", copy: "",
+        stat: `Raggio +${Math.round(mu.radius.perLevel * state.missileRadius * 100)}%`,
+        level: state.missileRadius, max: BALANCE.maxLevel, selected: false, main: null,
+        side: upAction("up-radius", mu.radius.base, state.missileRadius),
+      },
+    );
+    const launchers = turrets.some((t) => t.kind === "missile");
+    return [
+      { key: "gun", title: "Cannone personale", note: "", cards: guns },
+      { key: "tower", title: `Torrette · ${turrets.length}/${BALANCE.turrets.max}`, note: "Ogni torretta in più costa il 25% in più.", cards: towers },
+      launchers
+        ? { key: "missile", title: "Missili", note: "Più è potente, più tarda a ricaricare.", cards: warheads }
+        : { key: "missile", title: "Missili", note: "Piazza un lancia-missili per scegliere le testate.", cards: [] as ShopCard[] },
+    ];
   }
 
   function snapshot() {
     const bossE = enemies.find((e) => e.boss);
-    const guns: MainGun[] = ["singolo", "raffica", "mitra", "rosa"];
-    const gunName: Record<MainGun, string> = { singolo: "Singolo", raffica: "Raffica", mitra: "Mitra", rosa: "Rosa" };
-    const cannonN = turrets.filter((t) => t.kind === "cannon").length;
-    const missileN = turrets.filter((t) => t.kind === "missile").length;
-    const bossHint = bossE && bossE.mesh.position.length() > visibleRadius() * 0.86
-      ? { angle: Math.atan2(bossE.mesh.position.y, bossE.mesh.position.x) }
-      : null;
+    const ownedGuns = GUNS.filter((id) => state.gunLevels[id] > 0);
+    const bossOff = bossE && !onScreen(bossE.mesh.position, 0);
+    const bossHint = bossWarn > 0
+      ? { angle: bossWarnAngle, warn: true }
+      : bossOff
+        ? { angle: Math.atan2(bossE.mesh.position.y, bossE.mesh.position.x), warn: false }
+        : null;
     return {
       ...state,
-      levels: { ...state.levels },
+      gunLevels: { ...state.gunLevels },
       ownedMissiles: { ...state.ownedMissiles },
-      ownedGuns: { ...state.ownedGuns },
-      ownedAmmo: { ...state.ownedAmmo },
       phase,
       flash,
       veil,
@@ -445,51 +655,16 @@ export function createDefenseMode(hooks: DefenseHooks) {
       boss: Boolean(bossE),
       bossHp: bossE ? Math.max(0, bossE.hp) : 0,
       bossMax: bossE ? bossE.maxHp : 0,
-      missileCd,
-      missileCdMax,
+      bossShielded: Boolean(bossE && bossE.entering > 0),
       placing: place?.kind ?? null,
       placeMsg,
-      shopKind: state.shopKind,
-      guide: state.guide,
       bossHint,
+      resume: state.guide && savedRun ? { wave: savedRun.wave, exp: Math.floor(savedRun.exp) } : null,
       turrets: turrets.map((t) => ({ kind: t.kind, angle: t.angle })),
-      cannonTurrets: cannonN,
-      missileTurrets: missileN,
-      costs: {
-        raffica: GUN_COST.raffica,
-        mitra: GUN_COST.mitra,
-        rosa: GUN_COST.rosa,
-        doppio: AMMO_COST.doppio,
-        bombe: AMMO_COST.bombe,
-        cannon: turretCost("cannon"),
-        missile: turretCost("missile"),
-        cluster: MISSILE_COST.cluster,
-        limited: MISSILE_COST.limited,
-        slow: MISSILE_COST.slow,
-        homing: MISSILE_COST.homing,
-      },
-      guns: guns.map((id) => ({
-        id: `gun-${id}`,
-        name: gunName[id],
-        owned: state.ownedGuns[id],
-        selected: state.mainGun === id,
-        cost: id === "singolo" ? 0 : GUN_COST[id],
-      })),
-      ammo: (["singolo", "doppio", "bombe"] as AutoMode[]).map((id) => ({
-        id: `ammo-${id}`,
-        name: id === "singolo" ? "1 colpo" : id === "doppio" ? "Doppio" : "Bombe",
-        owned: state.ownedAmmo[id],
-        selected: state.autoMode === id,
-        cost: id === "singolo" ? 0 : AMMO_COST[id],
-      })),
-      missiles: [
-        { id: "missile-basic", name: "Singolo", owned: true, selected: state.missile === "none", cost: 0, open: true },
-        { id: "cluster", name: "Grappolo", owned: state.ownedMissiles.cluster, selected: state.missile === "cluster", cost: MISSILE_COST.cluster, open: missileBuyable("cluster") || state.ownedMissiles.cluster },
-        { id: "limited", name: "Limite", owned: state.ownedMissiles.limited, selected: state.missile === "limited", cost: MISSILE_COST.limited, open: missileBuyable("limited") || state.ownedMissiles.limited },
-        { id: "slow", name: "Rada", owned: state.ownedMissiles.slow, selected: state.missile === "slow", cost: MISSILE_COST.slow, open: missileBuyable("slow") || state.ownedMissiles.slow },
-        { id: "homing", name: "Ricerca", owned: state.ownedMissiles.homing, selected: state.missile === "homing", cost: MISSILE_COST.homing, open: missileBuyable("homing") || state.ownedMissiles.homing },
-      ],
-      slots: shopSlots(),
+      turretCount: turrets.length,
+      turretMax: BALANCE.turrets.max,
+      guns: ownedGuns.map((id) => ({ id: `gun-${id}`, name: GUN_NAME[id], level: state.gunLevels[id], selected: state.mainGun === id })),
+      sections: shopModel(),
     };
   }
 
@@ -551,6 +726,35 @@ export function createDefenseMode(hooks: DefenseHooks) {
     return g;
   }
 
+  function makeMortar() {
+    const g = new THREE.Group();
+    const mat = new THREE.MeshStandardMaterial({ color: 0xff7a3a, emissive: 0x5a1e08, emissiveIntensity: 0.7, metalness: 0.4, roughness: 0.4 });
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.13, 0.07, 12), mat);
+    base.rotation.x = Math.PI / 2;
+    const tube = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.06, 0.075, 0.2, 10),
+      new THREE.MeshStandardMaterial({ color: 0xffc29a, emissive: 0xff6a22, emissiveIntensity: 0.35, metalness: 0.3, roughness: 0.4 }),
+    );
+    tube.rotation.z = Math.PI / 2;
+    tube.position.x = 0.13;
+    g.add(base, tube);
+    hooks.getScene().add(g);
+    return g;
+  }
+
+  function makeTurretMesh(kind: TurretKind) {
+    return kind === "cannon" ? makeCannon(false) : kind === "missile" ? makeLauncher() : makeMortar();
+  }
+
+  function turretCone(kind: TurretKind) {
+    const deg = kind === "cannon" ? BALANCE.turrets.cannon.coneDeg : kind === "mortar" ? BALANCE.turrets.mortar.coneDeg : BALANCE.turrets.missile.coneDeg;
+    return (deg * Math.PI) / 180;
+  }
+
+  function turretColor(kind: TurretKind) {
+    return kind === "cannon" ? 0x7dfff0 : kind === "missile" ? 0xffb15a : 0xff7a3a;
+  }
+
   function disposeObject(obj: THREE.Object3D) {
     hooks.getScene().remove(obj);
     obj.traverse((child) => {
@@ -607,29 +811,28 @@ export function createDefenseMode(hooks: DefenseHooks) {
     }
     if (!ghost || ghost.userData.kind !== place.kind) {
       clearGhost();
-      ghost = place.kind === "cannon" ? makeCannon(false) : makeLauncher();
+      ghost = makeTurretMesh(place.kind);
       ghost.userData.kind = place.kind;
-      ghost.add(makeCone(place.kind === "cannon" ? 0x7dfff0 : 0xffb15a, 0.5, place.kind === "cannon" ? CONE_CANNON : CONE_MISSILE));
+      ghost.add(makeCone(turretColor(place.kind), 0.5, turretCone(place.kind)));
     }
     ghost.position.set(Math.cos(place.angle) * RIM, Math.sin(place.angle) * RIM, 0.08);
     ghost.rotation.set(0, 0, place.kind === "missile" ? missileFacing(place.angle) : place.angle);
     ghost.visible = true;
   }
 
-  function addTurret(kind: "cannon" | "missile", angle: number) {
-    const mesh = kind === "cannon" ? makeCannon(false) : makeLauncher();
-    mesh.add(makeCone(kind === "cannon" ? 0x7dfff0 : 0xffb15a, 0.42, kind === "cannon" ? CONE_CANNON : CONE_MISSILE));
+  function addTurret(kind: TurretKind, angle: number) {
+    const mesh = makeTurretMesh(kind);
+    mesh.add(makeCone(turretColor(kind), kind === "mortar" ? 0.24 : 0.42, turretCone(kind)));
     const turret = { angle, kind, cd: 0.35, mesh };
     turrets.push(turret);
-    state.pods = turrets.length;
     placeTurret(turret);
   }
 
   function missileFacing(base: number) {
-    return base + Math.sin(performance.now() * 0.0021) * ((10 * Math.PI) / 180);
+    return base + Math.sin(performance.now() * 0.0021) * ((BALANCE.turrets.missile.sweepDeg * Math.PI) / 180);
   }
 
-  function placeTurret(t: { angle: number; kind?: "cannon" | "missile"; mesh: THREE.Group }) {
+  function placeTurret(t: { angle: number; kind?: TurretKind; mesh: THREE.Group }) {
     const show = phase === "play" || phase === "enter";
     const facing = t.kind === "missile" ? missileFacing(t.angle) : t.angle;
     t.mesh.position.set(Math.cos(t.angle) * RIM, Math.sin(t.angle) * RIM, 0.05);
@@ -826,11 +1029,25 @@ export function createDefenseMode(hooks: DefenseHooks) {
     }
   }
 
-  function spawnEnemy(boss = false) {
-    const angle = Math.random() * Math.PI * 2;
-    const edge = visibleRadius();
-    const dist = edge + 0.9 + (boss ? 0.4 : Math.random() * 0.35);
-    const radius = boss ? 0.34 + state.wave * 0.06 : 0.16;
+  /** Distanza dal centro al bordo dello schermo lungo un angolo. */
+  function edgeDist(angle: number) {
+    const v = viewHalf();
+    const c = Math.abs(Math.cos(angle));
+    const sn = Math.abs(Math.sin(angle));
+    return Math.min(c > 1e-3 ? v.w / c : Infinity, sn > 1e-3 ? v.h / sn : Infinity);
+  }
+
+  /** Distanza a cui il boss gira intorno alla Terra: sempre dentro lo schermo. */
+  function bossHold(radius: number) {
+    const v = viewHalf();
+    return THREE.MathUtils.clamp(Math.min(v.w, v.h) - radius * 1.9 - 0.25, 2.1, 4.4);
+  }
+
+  function spawnEnemy(boss = false, at?: number) {
+    const angle = at ?? Math.random() * Math.PI * 2;
+    const radius0 = boss ? 0.34 + state.wave * 0.06 : 0.16;
+    const dist = edgeDist(angle) + (boss ? radius0 * 2 + 0.35 : 0.45 + Math.random() * 0.35);
+    const radius = radius0;
     const hp = boss ? 22 + state.wave * 8 : 1.6 + state.wave * 0.45;
     const mesh = new THREE.Mesh(
       boss ? new THREE.IcosahedronGeometry(radius, 0) : new THREE.OctahedronGeometry(0.16, 0),
@@ -865,10 +1082,11 @@ export function createDefenseMode(hooks: DefenseHooks) {
       boss,
       radius,
       mode: "in",
-      modeT: 1.6,
+      modeT: 0,
       strafe: Math.random() < 0.5 ? 1 : -1,
       shotT: 0.85,
       slow: 0,
+      entering: boss ? 1 : 0,
     });
     if (boss) burst(mesh.position, 0xffb15a, 18);
   }
@@ -938,6 +1156,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
     placeMsg = "";
     clearGhost();
     bossSpawned = true;
+    saveRun();
   }
 
   function hurtEarth(dmg: number, pos: THREE.Vector3) {
@@ -958,15 +1177,17 @@ export function createDefenseMode(hooks: DefenseHooks) {
     if (state.earthHP <= 0) beginBoom();
   }
 
-  function fireBolt(angle: number, kind: ShotKind, speed: number, damage: number, color: number, range: number, life: number, pierce = 1) {
-    const rad = kind === "bolt" ? 0.04 : kind === "bomb" ? 0.075 : kind === "homing" ? 0.095 : 0.062;
+  function fireBolt(angle: number, kind: ShotKind, speed: number, damage: number, color: number, range: number, life: number, pierce = 1, blast = 0, blastDmg = 0, side = 0) {
+    const rad = kind === "bolt" ? 0.04 : kind === "bomb" ? 0.075 : kind === "termobarica" ? 0.12 : kind === "ricerca" ? 0.095 : 0.062;
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(rad, 6, 6),
       new THREE.MeshBasicMaterial({ color }),
     );
-    mesh.position.set(Math.cos(angle) * (RIM + 0.28), Math.sin(angle) * (RIM + 0.28), 0.05);
+    const r0 = RIM + 0.28;
+    mesh.position.set(Math.cos(angle) * r0 - Math.sin(angle) * side, Math.sin(angle) * r0 + Math.cos(angle) * side, 0.05);
     hooks.getScene().add(mesh);
-    const reach = kind === "bomb" || kind === "cluster" ? life : Math.max(life, (visibleRadius() + 1.6) / Math.max(0.3, speed));
+    const ranged = kind === "bomb" || kind === "grappolo" || kind === "termobarica";
+    const reach = ranged ? Math.max(life, range / Math.max(0.3, speed) + 0.2) : Math.max(life, (visibleRadius() + 1.6) / Math.max(0.3, speed));
     projectiles.push({
       mesh,
       vel: new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0).multiplyScalar(speed),
@@ -976,80 +1197,82 @@ export function createDefenseMode(hooks: DefenseHooks) {
       traveled: 0,
       range,
       pierce,
+      blast,
+      blastDmg,
     });
   }
 
   function fireMainOnce() {
-    if (state.mainGun === "rosa") {
-      const n = 7;
+    const id = state.mainGun;
+    const st = gunStats(id);
+    if (id === "rosa") {
       const span = 0.72;
-      for (let i = 0; i < n; i += 1) {
-        const a = aimAngle - span / 2 + (span * i) / (n - 1);
-        fireBolt(a, "bolt", 6.3, 0.55, 0xfff1c2, 11, 1.35);
+      for (let i = 0; i < st.pellets; i += 1) {
+        const a = aimAngle - span / 2 + (span * i) / (st.pellets - 1);
+        fireBolt(a, "bolt", 6.3, st.damage, 0xfff1c2, 11, 1.35);
       }
       return;
     }
-    const dmg = state.mainGun === "mitra" ? 0.38 : state.mainGun === "raffica" ? 0.85 : 1.15;
-    const speed = state.mainGun === "mitra" ? 7.4 : 6.4;
-    const color = state.mainGun === "mitra" ? 0xb8fff4 : 0x7dfff0;
-    fireBolt(aimAngle, "bolt", speed, dmg, color, 18, 2.3);
+    if (id === "doppio") {
+      fireBolt(aimAngle, "bolt", 6.6, st.damage, 0x9dffe8, 18, 2.3, 1, 0, 0, -0.07);
+      fireBolt(aimAngle, "bolt", 6.6, st.damage, 0x9dffe8, 18, 2.3, 1, 0, 0, 0.07);
+      return;
+    }
+    const speed = id === "mitra" ? 7.4 : 6.4;
+    const color = id === "mitra" ? 0xb8fff4 : 0x7dfff0;
+    fireBolt(aimAngle, "bolt", speed, st.damage, color, 18, 2.3);
   }
 
-  function coneAim(facing: number, cone: number) {
-    let best: number | null = null;
+  /** Bersaglio più allineato dentro il cono, solo tra quelli visibili sullo schermo. */
+  function coneAim(facing: number, cone: number, maxDist = Infinity) {
+    let best: { angle: number; dist: number } | null = null;
     let bestAbs = cone + 1e-6;
-    const consider = (a: number) => {
-      const d = angDelta(a, facing);
+    const consider = (p: THREE.Vector3) => {
+      const dist = p.length();
+      if (dist > maxDist) return;
+      const d = angDelta(Math.atan2(p.y, p.x), facing);
       const ad = Math.abs(d);
       if (ad <= cone && ad < bestAbs) {
         bestAbs = ad;
-        best = facing + d;
+        best = { angle: facing + d, dist };
       }
     };
-    for (const e of enemies) consider(Math.atan2(e.mesh.position.y, e.mesh.position.x));
-    for (const h of hostiles) consider(Math.atan2(h.mesh.position.y, h.mesh.position.x));
-    return best;
+    for (const e of enemies) if (targetable(e)) consider(e.mesh.position);
+    for (const h of hostiles) if (onScreen(h.mesh.position)) consider(h.mesh.position);
+    return best as { angle: number; dist: number } | null;
   }
 
-  function fireTurret(t: { angle: number; kind: "cannon" | "missile"; cd: number }) {
+  function fireWarhead(angle: number) {
+    const id = state.missile;
+    const w = BALANCE.missiles[id];
+    const cal = turretDamage();
+    const r = warheadRadius(id);
+    if (id === "termobarica") fireBolt(angle, "termobarica", 2.7, 0, 0xff5a2a, 7.5, 3.5, 1, r, w.damage * cal);
+    else if (id === "ricerca") fireBolt(angle, "ricerca", 5.3, w.damage * cal, 0xffc14d, 22, 3.5, 1, r, w.damage * cal * 0.4);
+    else if (id === "grappolo") fireBolt(angle, "grappolo", 3.6, 0, 0xffd27a, 4.35, 2.3, 1, r, w.damage * cal);
+    else if (id === "rada") fireBolt(angle, "rada", 3.7, 0, 0xc9b6ff, 14, 2.8, 1, r, w.damage * cal);
+    else fireBolt(angle, "msingle", 5.6, w.damage * cal, 0xffd27a, 16, 2.3);
+  }
+
+  function fireTurret(t: Turret) {
     const facing = t.kind === "missile" ? missileFacing(t.angle) : t.angle;
-    const cone = t.kind === "cannon" ? CONE_CANNON : CONE_MISSILE;
-    const aim = coneAim(facing, cone);
+    const cfg = BALANCE.turrets;
+    const aim = coneAim(facing, turretCone(t.kind), t.kind === "mortar" ? cfg.mortar.reach : Infinity);
     if (aim == null) return false;
+    const cal = turretDamage();
     if (t.kind === "missile") {
-      const kind = state.missile;
-      if (kind === "homing") {
-        fireBolt(facing, "homing", 5.3, 7.4, 0xffc14d, 22, 3.5, 4);
-        t.cd = 3.1;
-      } else if (kind === "slow") {
-        fireBolt(facing, "slow", 3.7, 1.3, 0xc9b6ff, 14, 2.8, 1);
-        t.cd = 2.7;
-      } else if (kind === "limited") {
-        fireBolt(facing, "limited", 4.7, 3.6, 0xff9a6a, 12, 1.7, 1);
-        t.cd = 2.2;
-      } else if (kind === "cluster") {
-        fireBolt(facing, "cluster", 3.6, 1.6, 0xffd27a, 4.35, 2.3, 1);
-        t.cd = 1.9;
-      } else {
-        fireBolt(facing, "bolt", 5.4, 1.25, 0xffd27a, 16, 2.3);
-        t.cd = 1.15;
-      }
+      fireWarhead(facing);
+      t.cd = warheadCooldown(state.missile);
       return true;
     }
-    if (state.autoMode === "doppio") {
-      const s = (1 * Math.PI) / 180;
-      fireBolt(t.angle - s, "bolt", 5.8, 0.48, 0xffd27a, 16, 2.1);
-      fireBolt(t.angle + s, "bolt", 5.8, 0.48, 0xffd27a, 16, 2.1);
-      t.cd = 0.74;
+    if (t.kind === "mortar") {
+      const range = THREE.MathUtils.clamp(aim.dist - RIM - 0.28, 0.6, cfg.mortar.reach);
+      fireBolt(aim.angle, "bomb", 3.25, 0, 0xff7a3a, range, 0.5, 1, cfg.mortar.radius, cfg.mortar.damage * cal);
+      t.cd = cfg.mortar.cooldown * turretRate();
       return true;
     }
-    if (state.autoMode === "bombe") {
-      fireBolt(t.angle, "bomb", 3.25, 0.35, 0xff7a3a, 4.2, 2.5);
-      t.cd = 1.28;
-      return true;
-    }
-    fireBolt(t.angle, "bolt", 5.6, 0.7, 0xffb15a, 16, 2.2);
-    t.cd = 0.55;
+    fireBolt(t.angle, "bolt", 5.6, cfg.cannon.damage * cal, 0xffb15a, 16, 2.2);
+    t.cd = cfg.cannon.cooldown * turretRate();
     return true;
   }
 
@@ -1060,23 +1283,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
     }
   }
 
-  function launchMissile() {
-    const kind = state.missile === "none" ? "cluster" : state.missile;
-    if (kind === "homing") {
-      fireBolt(aimAngle, "homing", 5.3, 7.4, 0xffc14d, 22, 3.5, 4);
-      missileCdMax = 3.35;
-    } else if (kind === "slow") {
-      fireBolt(aimAngle, "slow", 3.7, 1.3, 0xc9b6ff, 14, 2.8, 1);
-      missileCdMax = 3.05;
-    } else if (kind === "limited") {
-      fireBolt(aimAngle, "limited", 4.7, 3.6, 0xff9a6a, 12, 1.7, 1);
-      missileCdMax = 2.45;
-    } else {
-      fireBolt(aimAngle, "cluster", 3.6, 1.6, 0xffd27a, 4.35, 2.3, 1);
-      missileCdMax = 2.15;
-    }
-    missileCd = missileCdMax;
-  }
+
 
   function spawnHostile(origin: THREE.Vector3, radius: number) {
     const dir = origin.clone().negate();
@@ -1103,7 +1310,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
     const started = performance.now();
     const grow = () => {
       const k = (performance.now() - started) / 280;
-      ring.scale.setScalar(1 + k * (3.2 + radius * 2.4));
+      ring.scale.setScalar(1 + k * radius * 3.4);
       (ring.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.8 - k);
       if (k < 1) requestAnimationFrame(grow);
       else {
@@ -1114,6 +1321,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
     };
     grow();
     for (let j = enemies.length - 1; j >= 0; j -= 1) {
+      if (!targetable(enemies[j])) continue;
       if (enemies[j].mesh.position.distanceTo(pos) > radius + enemies[j].radius) continue;
       enemies[j].hp -= dmg;
       if (enemies[j].hp <= 0) killEnemy(j);
@@ -1125,11 +1333,12 @@ export function createDefenseMode(hooks: DefenseHooks) {
     }
   }
 
-  function applySlow(pos: THREE.Vector3) {
+  function applySlow(pos: THREE.Vector3, radius: number, dmg: number) {
+    const slowFor = BALANCE.missiles.rada.slowFor;
     for (const e of enemies) {
-      if (e.mesh.position.distanceTo(pos) < 2.5) e.slow = Math.max(e.slow, 3.4);
+      if (targetable(e) && e.mesh.position.distanceTo(pos) < radius + e.radius) e.slow = Math.max(e.slow, slowFor);
     }
-    areaBlast(pos, 2.15, 1.7, 0xc9b6ff);
+    areaBlast(pos, radius, dmg, 0xc9b6ff);
   }
 
   function clearActors() {
@@ -1409,6 +1618,8 @@ export function createDefenseMode(hooks: DefenseHooks) {
       return;
     }
 
+    zoom += (zoomGoal - zoom) * (1 - Math.exp(-dt * 7));
+    if (Math.abs(zoomGoal - zoom) < 1e-4) zoom = zoomGoal;
     cam.position.set((Math.random() - 0.5) * hitShake * 0.22, (Math.random() - 0.5) * hitShake * 0.22, viewZ(cam));
     hitShake = Math.max(0, hitShake - dt * 1.8);
     cam.up.set(0, 1, 0);
@@ -1442,8 +1653,15 @@ export function createDefenseMode(hooks: DefenseHooks) {
             trashSpawned += 1;
           }
         }
-      } else if (!trashAlive && spawnTimer > 0.35) {
-        spawnEnemy(true);
+      } else if (!trashAlive && spawnTimer > 0.35 && bossWarn <= 0) {
+        bossWarn = BOSS_WARN;
+        bossWarnAngle = Math.random() * Math.PI * 2;
+      }
+    }
+    if (bossWarn > 0 && !state.shop && state.freezeLeft <= 0) {
+      bossWarn = Math.max(0, bossWarn - dt);
+      if (bossWarn === 0) {
+        spawnEnemy(true, bossWarnAngle);
         bossSpawned = true;
       }
     }
@@ -1464,9 +1682,15 @@ export function createDefenseMode(hooks: DefenseHooks) {
           if (ring) ring.rotation.z -= dt * 1.5;
           const pos = e.mesh.position;
           const dist = Math.max(0.001, pos.length());
-          const diving = e.hp <= e.maxHp * 0.25;
-          const hold = 4.4;
-          if (diving) {
+          const hold = bossHold(e.radius);
+          if (e.entering > 0) {
+            if (onScreen(pos, e.radius)) e.entering = 0;
+            else pos.addScaledVector(pos.clone().negate().normalize(), Math.max(0.9, pace * 2.2) * dt);
+          }
+          const diving = e.entering <= 0 && e.hp <= e.maxHp * 0.25;
+          if (e.entering > 0) {
+            /* entra nello schermo prima di tutto il resto */
+          } else if (diving) {
             pos.addScaledVector(pos.clone().negate().normalize(), Math.min(0.62, pace + 0.18) * dt);
           } else if (dist < hold) {
             pos.addScaledVector(pos.clone().normalize(), 0.7 * dt);
@@ -1475,7 +1699,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
             pos.addScaledVector(tang, e.strafe * 0.38 * dt);
             if (dist > hold + 1.6) pos.addScaledVector(pos.clone().negate().normalize(), 0.22 * dt);
           }
-          if (state.wave >= 3) {
+          if (state.wave >= 3 && e.entering <= 0) {
             e.shotT -= dt;
             if (e.shotT <= 0) {
               const n = 1 + Math.floor((state.wave - 3) / 2);
@@ -1490,10 +1714,21 @@ export function createDefenseMode(hooks: DefenseHooks) {
         e.mesh.rotation.z += dt * (e.boss ? 0.8 : 2.2);
       }
       const moonHit = e.radius + 0.32;
-      if (e.mesh.position.distanceTo(moonPos) < moonHit) {
+      if (e.boss) e.modeT = Math.max(0, e.modeT - dt);
+      if (e.mesh.position.distanceTo(moonPos) < moonHit && targetable(e)) {
         burst(e.mesh.position, 0x9ecbff, e.boss ? 16 : 12);
-        killEnemy(i);
-        continue;
+        if (!e.boss) {
+          killEnemy(i);
+          continue;
+        }
+        if (e.modeT <= 0) {
+          e.modeT = 1.2;
+          e.hp -= e.maxHp * 0.12;
+          if (e.hp <= 0) {
+            killEnemy(i);
+            continue;
+          }
+        }
       }
       if (frozen) continue;
       if (e.mesh.position.length() < 1.02 + e.radius) {
@@ -1558,45 +1793,34 @@ export function createDefenseMode(hooks: DefenseHooks) {
     }
 
     fireCooldown -= dt;
-    missileCd = Math.max(0, missileCd - dt);
     for (const t of turrets) t.cd = Math.max(0, t.cd - dt);
     const threats = enemies.length > 0 || hostiles.length > 0;
-    if (!state.shop && threats && state.mainGun === "raffica") {
-      if (burstLeft > 0) {
-        if (fireCooldown <= 0) {
-          fireMainOnce();
-          burstLeft -= 1;
-          fireCooldown = burstLeft > 0 ? 0.07 : 0.62;
-        }
-      } else if (fireCooldown <= 0) {
-        burstLeft = 3;
-        fireCooldown = 0;
-      }
-    } else if (!state.shop && threats && fireCooldown <= 0) {
+    if (!state.shop && threats && fireCooldown <= 0) {
       fireMainOnce();
-      fireCooldown = state.mainGun === "mitra" ? 0.08 : state.mainGun === "rosa" ? 0.5 : 0.32;
+      fireCooldown = gunStats(state.mainGun).cooldown;
     }
     if (!state.shop && !frozen && threats) fireAuto();
 
     for (let i = projectiles.length - 1; i >= 0; i -= 1) {
       const p = projectiles[i];
       if (frozen && p.kind !== "bolt") continue;
-      const homing = p.kind === "limited" || p.kind === "slow" || p.kind === "homing";
+      const homing = p.kind === "rada" || p.kind === "ricerca" || p.kind === "termobarica";
       if (homing && enemies.length) {
-        let best = enemies[0];
+        let best: Enemy | null = null;
         let bestD = Infinity;
         for (const e of enemies) {
+          if (!targetable(e)) continue;
           const d = e.mesh.position.distanceToSquared(p.mesh.position);
           if (d < bestD) {
             bestD = d;
             best = e;
           }
         }
-        const desired = best.mesh.position.clone().sub(p.mesh.position);
+        const desired = best ? best.mesh.position.clone().sub(p.mesh.position) : new THREE.Vector3();
         desired.z = 0;
-        if (desired.lengthSq() > 1e-6) {
-          const speed = p.kind === "homing" ? 6.4 : p.kind === "slow" ? 3.8 : 4.6;
-          const turn = p.kind === "homing" ? 7.2 : p.kind === "limited" ? 2.5 : 4.2;
+        if (best && desired.lengthSq() > 1e-6) {
+          const speed = p.kind === "ricerca" ? 6.4 : p.kind === "rada" ? 3.8 : 2.7;
+          const turn = p.kind === "ricerca" ? 7.2 : p.kind === "rada" ? 4.2 : 1.6;
           desired.normalize().multiplyScalar(speed);
           p.vel.lerp(desired, 1 - Math.exp(-dt * turn));
         }
@@ -1605,7 +1829,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
       p.mesh.position.add(step);
       p.traveled += step.length();
       p.life -= dt;
-      const ranged = (p.kind === "cluster" || p.kind === "bomb") && p.traveled >= p.range;
+      const ranged = (p.kind === "grappolo" || p.kind === "bomb" || p.kind === "termobarica") && p.traveled >= p.range;
       let spent = p.life <= 0 || ranged;
       if (!spent) {
         for (let h = hostiles.length - 1; h >= 0; h -= 1) {
@@ -1627,6 +1851,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
       }
       if (!spent) {
         for (let j = enemies.length - 1; j >= 0; j -= 1) {
+          if (!targetable(enemies[j])) continue;
           const reach = enemies[j].radius + (p.kind === "bolt" ? 0.16 : 0.26);
           if (p.mesh.position.distanceTo(enemies[j].mesh.position) > reach) continue;
           enemies[j].hp -= p.damage;
@@ -1642,11 +1867,20 @@ export function createDefenseMode(hooks: DefenseHooks) {
       }
       if (!spent) continue;
       const pos = p.mesh.position.clone();
-      if (p.kind === "cluster") areaBlast(pos, 1.35, 2.8, 0xffe29a);
-      else if (p.kind === "bomb") areaBlast(pos, 1.5, 2.5, 0xff7a3a);
-      else if (p.kind === "homing") areaBlast(pos, 1.7, 5.6, 0xffc14d);
-      else if (p.kind === "slow") applySlow(pos);
-      else if (p.kind === "limited") burst(pos, 0xff9a6a, 4);
+      if (p.kind === "grappolo") {
+        const n = BALANCE.missiles.grappolo.bomblets;
+        for (let k = 0; k < n; k += 1) {
+          const a = (k / n) * Math.PI * 2 + Math.random() * 0.6;
+          const off = new THREE.Vector3(Math.cos(a), Math.sin(a), 0).multiplyScalar(0.35 + Math.random() * 0.55);
+          areaBlast(pos.clone().add(off), p.blast, p.blastDmg, 0xffe29a);
+        }
+      } else if (p.kind === "bomb") areaBlast(pos, p.blast, p.blastDmg, 0xff7a3a);
+      else if (p.kind === "ricerca") areaBlast(pos, p.blast, p.blastDmg, 0xffc14d);
+      else if (p.kind === "termobarica") {
+        areaBlast(pos, p.blast, p.blastDmg, 0xff5a2a);
+        hitShake = Math.min(0.6, hitShake + 0.35);
+      } else if (p.kind === "rada") applySlow(pos, p.blast, p.blastDmg);
+      else if (p.kind === "msingle") burst(pos, 0xffd27a, 4);
       disposeObject(p.mesh);
       projectiles.splice(i, 1);
     }
@@ -1709,11 +1943,10 @@ export function createDefenseMode(hooks: DefenseHooks) {
     pendingFinale = false;
     flash = 0;
     veil = 0;
-    zoom = 1;
+    zoom = 0.3;
+    zoomGoal = 0.3;
     spawnTimer = 0.4;
     fireCooldown = 0.2;
-    autoCd = 0.4;
-    missileCd = 0;
     hitShake = 0;
     waveTimer = 0;
     aimAngle = Math.PI / 2;
@@ -1738,6 +1971,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
   function exit(kind: "user" | "boom" = "user") {
     if (phase === "idle" || phase === "exit") return;
     pendingFinale = kind === "boom";
+    if (kind === "boom") savedRun = null;
     clearBoom();
     clearActors();
     persistRun(kind === "boom");
@@ -1769,6 +2003,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
     state.score = 0;
     state.lunarEnergy = 0;
     freshArcade();
+    dropRun();
     armWave();
     spawnTimer = 0.6;
     waveTimer = 0;
@@ -1776,10 +2011,30 @@ export function createDefenseMode(hooks: DefenseHooks) {
     syncCannons();
   }
 
+  /** Paga un upgrade a livelli e restituisce il nuovo livello, o null se non si può. */
+  function payLevel(base: number, level: number) {
+    const cost = levelCost(base, level);
+    if (cost == null || state.exp < cost) return null;
+    state.exp -= cost;
+    return level + 1;
+  }
+
   function buyUpgrade(type: string) {
+    const done = buyInner(type);
+    if (done && state.shop && state.shopKind === "wave" && type !== "shop-next") saveRun();
+    return done;
+  }
+
+  function buyInner(type: string) {
     if (phase === "idle" || phase === "exit" || phase === "boom" || state.over) return false;
     if (type === "guide-ok") {
+      if (savedRun) dropRun();
       state.guide = false;
+      return true;
+    }
+    if (type === "resume") {
+      if (!state.guide || !savedRun) return false;
+      resumeRun(savedRun);
       return true;
     }
     if (phase !== "play") return false;
@@ -1816,7 +2071,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
     }
     if (type === "place-ok") {
       if (!place || !state.shop) return false;
-      if (turrets.length >= MAX_TURRETS) {
+      if (turrets.length >= BALANCE.turrets.max) {
         placeMsg = "Massimo raggiunto";
         return false;
       }
@@ -1833,57 +2088,63 @@ export function createDefenseMode(hooks: DefenseHooks) {
       clearGhost();
       return true;
     }
-    if (type === "gun-singolo" || type === "gun-raffica" || type === "gun-mitra" || type === "gun-rosa") {
+    if (type.startsWith("gun-")) {
       const id = type.slice(4) as MainGun;
-      if (state.ownedGuns[id]) {
+      if (!(id in BALANCE.gun)) return false;
+      if (state.gunLevels[id] > 0) {
         state.mainGun = id;
-        burstLeft = 0;
         fireCooldown = 0;
         return true;
       }
       if (!state.shop) return false;
-      const cost = id === "singolo" ? 0 : GUN_COST[id];
-      if (state.exp < cost) return false;
-      state.exp -= cost;
-      state.ownedGuns[id] = true;
+      const next = payLevel(BALANCE.gun[id].base, 0);
+      if (next == null) return false;
+      state.gunLevels[id] = next;
       state.mainGun = id;
-      burstLeft = 0;
       fireCooldown = 0;
       return true;
     }
     if (!state.shop) return false;
-    if (type === "arm-cannon" || type === "arm-missile") {
-      const kind = type === "arm-cannon" ? "cannon" : "missile";
-      if (turrets.length >= MAX_TURRETS) return false;
+    if (type.startsWith("up-gun-")) {
+      const id = type.slice(7) as MainGun;
+      if (!(id in BALANCE.gun) || state.gunLevels[id] <= 0) return false;
+      const next = payLevel(BALANCE.gun[id].base, state.gunLevels[id]);
+      if (next == null) return false;
+      state.gunLevels[id] = next;
+      return true;
+    }
+    if (type === "up-rate" || type === "up-cal") {
+      const key = type === "up-rate" ? "turretRate" : "turretCalibre";
+      const base = type === "up-rate" ? BALANCE.turretUpgrades.rate.base : BALANCE.turretUpgrades.calibre.base;
+      const next = payLevel(base, state[key]);
+      if (next == null) return false;
+      state[key] = next;
+      return true;
+    }
+    if (type === "up-reload" || type === "up-radius") {
+      if (!turrets.some((t) => t.kind === "missile")) return false;
+      const key = type === "up-reload" ? "missileReload" : "missileRadius";
+      const base = type === "up-reload" ? BALANCE.missileUpgrades.reload.base : BALANCE.missileUpgrades.radius.base;
+      const next = payLevel(base, state[key]);
+      if (next == null) return false;
+      state[key] = next;
+      return true;
+    }
+    if (type === "arm-cannon" || type === "arm-missile" || type === "arm-mortar") {
+      const kind = type.slice(4) as TurretKind;
+      if (turrets.length >= BALANCE.turrets.max) return false;
       if (state.exp < turretCost(kind)) return false;
       place = { kind, angle: aimAngle };
-      placeMsg = tooClose(aimAngle) ? "Troppo vicina" : kind === "cannon" ? "Cono ±10°, non ruota" : "±2° che oscilla su ±10°";
+      const cone = kind === "cannon" ? `Cono ±${BALANCE.turrets.cannon.coneDeg}°, non ruota` : kind === "missile" ? `±${BALANCE.turrets.missile.coneDeg}° che oscilla su ±${BALANCE.turrets.missile.sweepDeg}°` : `Cono ±${BALANCE.turrets.mortar.coneDeg}°, gittata corta`;
+      placeMsg = tooClose(aimAngle) ? "Troppo vicina" : cone;
       syncGhost();
       return true;
     }
-    if (type === "ammo-singolo" || type === "ammo-doppio" || type === "ammo-bombe") {
-      if (!turrets.some((t) => t.kind === "cannon")) return false;
-      const id = type.slice(5) as AutoMode;
-      if (!state.ownedAmmo[id]) {
-        const cost = id === "singolo" ? 0 : AMMO_COST[id];
-        if (state.exp < cost) return false;
-        state.exp -= cost;
-        state.ownedAmmo[id] = true;
-      }
-      state.autoMode = id;
-      return true;
-    }
-    if (type === "missile-basic") {
-      if (!turrets.some((t) => t.kind === "missile")) return false;
-      state.missile = "none";
-      return true;
-    }
-    if (type === "cluster" || type === "limited" || type === "slow" || type === "homing") {
-      if (!turrets.some((t) => t.kind === "missile")) return false;
-      const id = type as MissileId;
+    if (type.startsWith("wh-")) {
+      const id = type.slice(3) as MissileId;
+      if (!(id in BALANCE.missiles) || !turrets.some((t) => t.kind === "missile")) return false;
       if (!state.ownedMissiles[id]) {
-        if (!missileBuyable(id)) return false;
-        const cost = MISSILE_COST[id];
+        const cost = BALANCE.missiles[id].cost;
         if (state.exp < cost) return false;
         state.exp -= cost;
         state.ownedMissiles[id] = true;
@@ -1894,7 +2155,26 @@ export function createDefenseMode(hooks: DefenseHooks) {
     return false;
   }
 
+  /** Sonda per i test automatici (attiva solo con ?etdebug nell'indirizzo). */
+  const debug = {
+    probe: () => ({
+      view: viewHalf(),
+      zoom,
+      zoomGoal,
+      camZ: hooks.getCamera().position.z,
+      bossWarn,
+      enemies: enemies.map((e) => ({ boss: e.boss, entering: e.entering, hp: e.hp, maxHp: e.maxHp, x: e.mesh.position.x, y: e.mesh.position.y, radius: e.radius, onScreen: onScreen(e.mesh.position, e.boss ? e.radius : 0), targetable: targetable(e) })),
+      turrets: turrets.map((t) => ({ kind: t.kind, cd: t.cd })),
+      cooldowns: Object.fromEntries(MISSILES.map((id) => [id, warheadCooldown(id)])),
+      gun: gunStats(state.mainGun),
+    }),
+    addExp: (n: number) => {
+      state.exp += n;
+    },
+  };
+
   return {
+    debug,
     state,
     enter,
     exit,

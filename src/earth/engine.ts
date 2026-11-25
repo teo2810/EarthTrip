@@ -463,6 +463,9 @@ export function mountEarth(
     },
   });
 
+  if (typeof location !== "undefined" && location.search.includes("etdebug")) {
+    (window as unknown as { __etDefense?: typeof defense }).__etDefense = defense;
+  }
   const onPointerMove = (e: PointerEvent | TouchEvent) => defense.onPointer(e);
   canvas.addEventListener("pointermove", onPointerMove);
   canvas.addEventListener("pointerdown", onPointerMove);

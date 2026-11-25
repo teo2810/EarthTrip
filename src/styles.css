@@ -1616,3 +1616,50 @@
   .et-lunar.is-ready { animation: none; }
 }
 
+
+/* Shop a livelli (v18) */
+.et-buy { grid-template-columns: 2.1rem 1fr auto; }
+.et-buy b { display: flex; align-items: baseline; gap: 0.4rem; flex-wrap: wrap; }
+.et-lvl {
+  font-style: normal;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 600;
+  padding: 0.05rem 0.38rem;
+  border: 1px solid color-mix(in srgb, #9dffe8 55%, transparent);
+  border-radius: 999px;
+  color: #9dffe8;
+}
+.et-stat { color: color-mix(in srgb, var(--color-fg) 78%, transparent); }
+.et-buy-note { margin: -0.15rem 0 0.35rem; color: var(--color-muted); font-size: 0.7rem; }
+.et-buy-acts { display: grid; gap: 0.25rem; justify-items: end; }
+.et-buy-acts button {
+  min-height: 2.25rem;
+  min-width: 4.6rem;
+  padding: 0 0.6rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: transparent;
+  color: #9dffe8;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  white-space: nowrap;
+  touch-action: manipulation;
+}
+.et-buy-acts button.is-up { border-color: color-mix(in srgb, #9dffe8 55%, transparent); }
+.et-buy-acts button:disabled { opacity: 0.42; }
+.et-resume { display: grid; gap: 0.4rem; }
+.et-modal-alt {
+  min-height: 2.6rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-fg);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.et-boss-arrow.is-warn { animation: et-boss-warn 0.5s ease-in-out infinite alternate; }
+@keyframes et-boss-warn { from { opacity: 0.35; } to { opacity: 1; } }
+.et-bossbar.is-shielded i { background: #9ecbff; opacity: 0.6; }

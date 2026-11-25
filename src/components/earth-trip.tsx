@@ -53,48 +53,21 @@ export function EarthTrip() {
     lastScore?: number | null;
     lastWave?: number | null;
   } | null>(null);
-  const [defenseState, setDefenseState] = useState({
+  const [defenseState, setDefenseState] = useState<HudState>({
     wave: 1,
     earthHP: 100,
     exp: 0,
     score: 0,
     lunarEnergy: 0,
     highscore: 0,
-    cannonCount: 1,
-    weaponType: "base" as "base" | "mg" | "multi" | "homing",
-    levels: { base: 1, mg: 0, multi: 0, homing: 0 },
-    slots: [] as { id: string; level: number; cost: number; owned: boolean; selected: boolean; action: "buy" | "upgrade" | "select" | "max"; affordable: boolean }[],
     phase: "play",
     flash: 0,
     veil: 0,
-    over: false,
-    zoom: 0.11,
+    zoom: 0.3,
     shield: 0,
     freezeLeft: 0,
-    boss: false,
-    bossHp: 0,
-    bossMax: 0,
     shop: false,
-    shopKind: null as "wave" | "freeze" | null,
     guide: false,
-    bossHint: null as { angle: number } | null,
-    mainGun: "singolo" as "singolo" | "raffica" | "mitra" | "rosa",
-    autoMode: "singolo" as "singolo" | "doppio" | "bombe",
-    missile: "none" as "cluster" | "limited" | "slow" | "homing" | "none",
-    placing: null as "cannon" | "missile" | null,
-    placeMsg: "",
-    cannonTurrets: 0,
-    missileTurrets: 0,
-    costs: { raffica: 70, mitra: 120, rosa: 160, doppio: 90, bombe: 140, cannon: 40, missile: 55, cluster: 80, limited: 130, slow: 170, homing: 260 },
-    guns: [] as { id: string; name: string; owned: boolean; selected: boolean; cost: number }[],
-    ammo: [] as { id: string; name: string; owned: boolean; selected: boolean; cost: number }[],
-    missiles: [] as { id: string; name: string; owned: boolean; selected: boolean; cost: number; open: boolean }[],
-    bestCleared: 0,
-    missileCd: 0,
-    missileCdMax: 2.2,
-    lastRun: null as { score: number; wave: number; at: number } | null,
-    bestRun: null as { score: number; wave: number; at: number } | null,
-    unlocked: { cluster: true, limited: false, slow: false, homing: false },
   });
 
   useEffect(() => {
@@ -584,17 +557,6 @@ function fmtLon(lon: number) {
   return `${Math.abs(x).toFixed(1)}°${x >= 0 ? "E" : "W"}`;
 }
 
-type DefenseSlot = {
-  id: string;
-  level: number;
-  cost: number;
-  owned: boolean;
-  selected: boolean;
-  action?: "buy" | "upgrade" | "select" | "max";
-  affordable?: boolean;
-  name?: string;
-};
-
 function IconSingle() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -693,36 +655,83 @@ function IconBomb() {
 
 const OFFER_ICON: Record<string, () => ReactNode> = {
   "gun-singolo": IconSingle,
-  "gun-raffica": IconBurst,
+  "gun-doppio": IconBurst,
   "gun-mitra": IconBurst,
   "gun-rosa": IconFan,
-  "ammo-singolo": IconSingle,
-  "ammo-doppio": IconBurst,
-  "ammo-bombe": IconBomb,
-  "missile-basic": IconRocket,
-  cluster: IconCluster,
-  limited: IconHoming,
-  slow: IconFreeze,
-  homing: IconHoming,
   "arm-cannon": IconTurret,
   "arm-missile": IconRocket,
+  "arm-mortar": IconBomb,
+  "up-rate": IconBurst,
+  "up-cal": IconTurret,
+  "wh-singolo": IconRocket,
+  "wh-rada": IconFreeze,
+  "wh-grappolo": IconCluster,
+  "wh-ricerca": IconHoming,
+  "wh-termobarica": IconBomb,
+  "up-reload": IconRocket,
+  "up-radius": IconCluster,
 };
 
 const OFFER_COPY: Record<string, string> = {
-  "gun-singolo": "Un colpo dritto e preciso. È l'unica arma con cui parti.",
-  "gun-raffica": "Tre colpi di fila, sullo stesso mirino.",
-  "gun-mitra": "Fuoco continuo. Ogni colpo fa meno danno.",
+  "gun-singolo": "Un colpo dritto e preciso. Ogni livello ne alza il danno.",
+  "gun-doppio": "Due colpi paralleli sullo stesso mirino.",
+  "gun-mitra": "Fuoco continuo: ogni livello spara più veloce.",
   "gun-rosa": "Ventaglio di pallini, come un colpo a pompa.",
-  "ammo-singolo": "Ogni cannone spara un colpo, solo dentro il cono.",
-  "ammo-doppio": "Due colpi affiancati, sempre dentro il cono.",
-  "ammo-bombe": "Bomba che scoppia a distanza e pulisce un'area.",
-  "missile-basic": "Razzo dritto, senza inseguire il bersaglio.",
-  cluster: "Esplode a mezza strada e colpisce intorno.",
-  limited: "Gira poco e dura poco. Danno alto.",
-  slow: "Rallenta i nemici nella zona dell'esplosione.",
-  homing: "Il più forte: segue il bersaglio. Si sblocca per ultimo.",
-  "arm-cannon": "Torretta fissa. Spara solo in avanti, ±10°, e non ruota.",
-  "arm-missile": "Torretta fissa. Il tiro resta ±2°, ma il cono oscilla su ±10°.",
+  "arm-cannon": "Spara in avanti, ±10°, e non ruota.",
+  "arm-missile": "Lunga gittata. Lancia la testata scelta sotto.",
+  "arm-mortar": "Bomba ad area sui nemici vicini, lenta.",
+  "up-rate": "Tutte le torrette sparano più spesso.",
+  "up-cal": "Tutte le torrette fanno più danno.",
+  "wh-singolo": "Razzo dritto, un solo bersaglio.",
+  "wh-rada": "Poco danno, ma rallenta tutto nella zona.",
+  "wh-grappolo": "Si apre in più bombe: colpisce più volte.",
+  "wh-ricerca": "Insegue il bersaglio e scoppia.",
+  "wh-termobarica": "Esplosione enorme, ricarica lentissima.",
+  "up-reload": "Missili pronti prima.",
+  "up-radius": "Esplosioni dei missili più larghe.",
+};
+
+type ShopAction = { id: string; label: string; cost: number | null; disabled: boolean };
+type ShopCard = {
+  key: string;
+  name: string;
+  icon: string;
+  stat: string;
+  level: number | null;
+  max: number;
+  selected: boolean;
+  main: ShopAction | null;
+  side: ShopAction | null;
+};
+type ShopSection = { key: string; title: string; note: string; cards: ShopCard[] };
+type HudState = {
+  wave: number;
+  earthHP: number;
+  exp: number;
+  score?: number;
+  lunarEnergy: number;
+  highscore: number;
+  phase?: string;
+  flash: number;
+  veil: number;
+  zoom?: number;
+  finale?: { score: number; wave: number; highscore: number; lastScore?: number | null; lastWave?: number | null } | null;
+  shield?: number;
+  freezeLeft?: number;
+  boss?: boolean;
+  bossHp?: number;
+  bossMax?: number;
+  bossShielded?: boolean;
+  shop?: boolean;
+  shopKind?: "wave" | "freeze" | null;
+  guide?: boolean;
+  resume?: { wave: number; exp: number } | null;
+  bossHint?: { angle: number; warn?: boolean } | null;
+  placing?: string | null;
+  placeMsg?: string;
+  guns?: { id: string; name: string; level: number; selected: boolean }[];
+  sections?: ShopSection[];
+  lastRun?: { score: number; wave: number } | null;
 };
 
 function ZoomRail({ value, onChange }: { value: number; onChange: (t: number) => void }) {
@@ -736,7 +745,10 @@ function ZoomRail({ value, onChange }: { value: number; onChange: (t: number) =>
     onChange(1 - t);
   }
   return (
-    <div className="et-zoom">
+    <div
+      className="et-zoom"
+      onWheel={(e) => onChange(Math.min(1, Math.max(0, value + Math.sign(e.deltaY) * 0.08)))}
+    >
       <span>Largo</span>
       <div
         className="et-zoom-track"
@@ -768,99 +780,73 @@ function ZoomRail({ value, onChange }: { value: number; onChange: (t: number) =>
   );
 }
 
-function DefenseHud({
-  state,
-  api,
-}: {
-  state: {
-    wave: number;
-    earthHP: number;
-    exp: number;
-    score?: number;
-    lunarEnergy: number;
-    highscore: number;
-    shield?: number;
-    freezeLeft?: number;
-    boss?: boolean;
-    bossHp?: number;
-    bossMax?: number;
-    shop?: boolean;
-    shopKind?: "wave" | "freeze" | null;
-    guide?: boolean;
-    bossHint?: { angle: number } | null;
-    placing?: "cannon" | "missile" | null;
-    placeMsg?: string;
-    cannonTurrets?: number;
-    missileTurrets?: number;
-    costs?: {
-      raffica: number;
-      mitra: number;
-      rosa: number;
-      doppio: number;
-      bombe: number;
-      cannon: number;
-      missile: number;
-      cluster: number;
-      limited: number;
-      slow: number;
-      homing: number;
-    };
-    guns?: { id: string; name: string; owned: boolean; selected: boolean; cost: number }[];
-    ammo?: { id: string; name: string; owned: boolean; selected: boolean; cost: number }[];
-    missiles?: { id: string; name: string; owned: boolean; selected: boolean; cost: number; open: boolean }[];
-    lastRun?: { score: number; wave: number } | null;
-  };
-  api: { current: EarthApi | null };
-}) {
+function ShopCardView({ card, exp, buy }: { card: ShopCard; exp: number; buy: (id: string) => void }) {
+  const Icon = OFFER_ICON[card.icon] ?? IconSingle;
+  const price = (a: ShopAction) => (a.cost == null ? a.label : `${a.label} · ${a.cost}`);
+  const tail = (a: ShopAction | null) =>
+    a && a.cost != null && !a.disabled ? ` Restano ${Math.max(0, exp - a.cost)}.` : "";
+  const main = card.main;
+  const side = card.side;
+  return (
+    <div className={card.selected ? "et-buy is-on" : "et-buy"}>
+      <Icon />
+      <span>
+        <b>
+          {card.name}
+          {card.level != null && card.max > 0 ? <i className="et-lvl">Liv. {card.level}/{card.max}</i> : null}
+        </b>
+        <small>
+          {OFFER_COPY[card.key] ?? ""} {card.stat ? <span className="et-stat">{card.stat}.</span> : null}
+          {tail(side ?? main)}
+        </small>
+      </span>
+      <span className="et-buy-acts">
+        {main ? (
+          <button type="button" disabled={main.disabled} onClick={() => buy(main.id)}>
+            {price(main)}
+          </button>
+        ) : null}
+        {side ? (
+          <button type="button" className="is-up" disabled={side.disabled} onClick={() => buy(side.id)}>
+            {price(side)}
+          </button>
+        ) : null}
+      </span>
+    </div>
+  );
+}
+
+/** Punto vicino al bordo dello schermo nella direzione del boss. */
+function edgeSpot(angle: number) {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  const t = Math.min(Math.abs(c) > 1e-3 ? (w / 2 - 70) / Math.abs(c) : Infinity, Math.abs(s) > 1e-3 ? (h / 2 - 110) / Math.abs(s) : Infinity);
+  return { x: w / 2 + c * t, y: h / 2 - s * t };
+}
+
+function DefenseHud({ state, api }: { state: HudState; api: { current: EarthApi | null } }) {
   const frozen = (state.freezeLeft ?? 0) > 0;
   const ready = state.lunarEnergy >= 100 && !frozen;
   const shop = Boolean(state.shop);
   const placing = state.placing ?? null;
   const exp = Math.floor(state.exp);
-  const costs = state.costs;
   const bossMax = state.bossMax ?? 0;
   const buy = (id: string) => api.current?.buyDefenseUpgrade(id);
   const guide = Boolean(state.guide);
   const waveLabel = state.boss ? `B${state.wave}` : shop ? `F${state.wave}` : String(state.wave);
   const rec = Math.max(state.highscore, Math.floor(state.score ?? 0));
-  const full = (state.cannonTurrets ?? 0) + (state.missileTurrets ?? 0) >= 6;
   const freezeShop = state.shopKind === "freeze";
-  function offer(item: { id: string; name: string; owned: boolean; selected: boolean; cost: number; open?: boolean }) {
-    const locked = item.open === false && !item.owned;
-    const poor = !item.owned && exp < item.cost;
-    const Icon = OFFER_ICON[item.id] ?? IconSingle;
-    const left = exp - item.cost;
-    const price = item.owned ? (item.selected ? "In uso" : "Usa") : poor ? `${item.cost}` : `−${item.cost}`;
-    const detail = locked
-      ? "Si sblocca per ultimo, dopo gli altri missili."
-      : item.owned
-        ? OFFER_COPY[item.id]
-        : `${OFFER_COPY[item.id]} Costa ${item.cost}, te ne restano ${Math.max(0, left)}.`;
-    return (
-      <button
-        key={item.id}
-        type="button"
-        className={item.selected ? "et-buy is-on" : "et-buy"}
-        disabled={locked || poor}
-        onClick={() => buy(item.id)}
-      >
-        <Icon />
-        <span>
-          <b>{item.name}</b>
-          <small>{detail}</small>
-        </span>
-        <em>{price}</em>
-      </button>
-    );
-  }
-  const ownedGuns = (state.guns ?? []).filter((g) => g.owned);
+  const ownedGuns = state.guns ?? [];
   const gunShort: Record<string, string> = {
     "gun-singolo": "1",
-    "gun-raffica": "Raf",
+    "gun-doppio": "2",
     "gun-mitra": "Mit",
     "gun-rosa": "Rosa",
   };
   const hint = state.bossHint;
+  const resume = state.resume;
   return (
     <>
       <div className={frozen ? "et-def-hud is-frozen" : "et-def-hud"}>
@@ -898,7 +884,7 @@ function DefenseHud({
           </button>
         </div>
         {bossMax > 0 ? (
-          <span className="et-bossbar" aria-label="Integrità del boss">
+          <span className={state.bossShielded ? "et-bossbar is-shielded" : "et-bossbar"} aria-label="Integrità del boss">
             <i style={{ width: `${Math.max(0, Math.min(100, ((state.bossHp ?? 0) / bossMax) * 100))}%` }} />
           </span>
         ) : null}
@@ -914,15 +900,15 @@ function DefenseHud({
       </div>
       {hint && !shop && !guide && !placing ? (
         <div
-          className="et-boss-arrow"
+          className={hint.warn ? "et-boss-arrow is-warn" : "et-boss-arrow"}
           style={{
-            left: `calc(50% + ${Math.cos(hint.angle) * 34}vmin)`,
-            top: `calc(50% - ${Math.sin(hint.angle) * 34}vmin)`,
-            transform: `translate(-50%, -50%) rotate(${-hint.angle}rad)`,
+            left: `${edgeSpot(hint.angle).x}px`,
+            top: `${edgeSpot(hint.angle).y}px`,
+            transform: "translate(-50%, -50%)",
           }}
         >
-          <i />
-          Boss
+          <i style={{ transform: `rotate(${-hint.angle}rad)` }} />
+          {hint.warn ? "Boss in arrivo" : "Boss"}
         </div>
       ) : null}
       {placing ? (
@@ -943,16 +929,27 @@ function DefenseHud({
               <h2>Difendi la Terra</h2>
             </header>
             <ol className="et-guide-list">
-              <li>Trascina per mirare. Parti solo con il cannone e il colpo singolo. Gli upgrade comprati si cambiano in basso, quando vuoi.</li>
-              <li>I punti si spendono a fine ondata. In scheda vedi quanti ne hai, quanto costa e quanti te ne restano.</li>
-              <li>I cannoni fissi sparano a ±10° e non ruotano. I missili restano a ±2°, ma il cono oscilla su ±10°.</li>
-              <li>Il boss sta lontano e scappa. Si lancia sulla Terra solo nell'ultimo quarto di vita. Se impatta, torna con la vita che gli restava, non piena.</li>
-              <li>I bonus non sono colpi: anello grande, scudo, fiocco di neve o croce verde. Il gelo ferma tutto e, se vuoi, apre lo shop.</li>
+              <li>Trascina per mirare. Il cannone ha quattro modalità: Singolo, Doppio, Mitra e Rosa. Ognuna si sblocca a parte e sale fino al Liv. 10.</li>
+              <li>I punti si spendono a fine ondata. Ogni livello costa il 35% in più del precedente: scegli cosa potenziare.</li>
+              <li>Fino a 8 torrette: Cannone base, Lancia-missili e Mortaio. Ogni torretta in più costa il 25% in più.</li>
+              <li>Le testate più potenti dei missili ricaricano più lentamente. La Termobarica è la più lenta.</li>
+              <li>Il boss si annuncia con una freccia, entra nello schermo e finché non è entrato non si può colpire.</li>
               <li>La super della Luna si carica distruggendo nemici. A anello pieno, tocca la Luna o il pulsante in basso: spazza nemici e colpi, ma il boss ne è immune.</li>
             </ol>
-            <button type="button" className="et-modal-go" onClick={() => buy("guide-ok")}>
-              Combatti
-            </button>
+            {resume ? (
+              <div className="et-resume">
+                <button type="button" className="et-modal-go" onClick={() => buy("resume")}>
+                  Riprendi ondata {resume.wave} · {resume.exp} punti
+                </button>
+                <button type="button" className="et-modal-alt" onClick={() => buy("guide-ok")}>
+                  Nuova partita
+                </button>
+              </div>
+            ) : (
+              <button type="button" className="et-modal-go" onClick={() => buy("guide-ok")}>
+                Combatti
+              </button>
+            )}
           </div>
         </div>
       ) : null}
@@ -966,53 +963,17 @@ function DefenseHud({
               </div>
             </header>
             <div className="et-modal-scroll">
-              <section>
-                <p className="et-buy-sec">Cannone personale</p>
-                <div className="et-buy-list">{(state.guns ?? []).map(offer)}</div>
-              </section>
-              <section>
-                <p className="et-buy-sec">Torrette</p>
-                <div className="et-buy-list">
-                  <button
-                    type="button"
-                    className="et-buy"
-                    disabled={!costs || exp < costs.cannon || full}
-                    onClick={() => buy("arm-cannon")}
-                  >
-                    <IconTurret />
-                    <span>
-                      <b>Cannone</b>
-                      <small>{OFFER_COPY["arm-cannon"]} {exp >= (costs?.cannon ?? 40) ? `Costa ${costs?.cannon ?? 40}, restano ${exp - (costs?.cannon ?? 40)}.` : `Costa ${costs?.cannon ?? 40}.`}</small>
-                    </span>
-                    <em>{costs?.cannon ?? 40}</em>
-                  </button>
-                  <button
-                    type="button"
-                    className="et-buy"
-                    disabled={!costs || exp < costs.missile || full}
-                    onClick={() => buy("arm-missile")}
-                  >
-                    <IconRocket />
-                    <span>
-                      <b>Lancia missili</b>
-                      <small>{OFFER_COPY["arm-missile"]} {exp >= (costs?.missile ?? 55) ? `Costa ${costs?.missile ?? 55}, restano ${exp - (costs?.missile ?? 55)}.` : `Costa ${costs?.missile ?? 55}.`}</small>
-                    </span>
-                    <em>{costs?.missile ?? 55}</em>
-                  </button>
-                </div>
-              </section>
-              {(state.cannonTurrets ?? 0) > 0 ? (
-                <section>
-                  <p className="et-buy-sec">Colpi dei cannoni</p>
-                  <div className="et-buy-list">{(state.ammo ?? []).map(offer)}</div>
+              {(state.sections ?? []).map((sec) => (
+                <section key={sec.key}>
+                  <p className="et-buy-sec">{sec.title}</p>
+                  {sec.note ? <p className="et-buy-note">{sec.note}</p> : null}
+                  <div className="et-buy-list">
+                    {sec.cards.map((card) => (
+                      <ShopCardView key={card.key} card={card} exp={exp} buy={buy} />
+                    ))}
+                  </div>
                 </section>
-              ) : null}
-              {(state.missileTurrets ?? 0) > 0 ? (
-                <section>
-                  <p className="et-buy-sec">Missili</p>
-                  <div className="et-buy-list">{(state.missiles ?? []).map(offer)}</div>
-                </section>
-              ) : null}
+              ))}
             </div>
             <button
               type="button"
