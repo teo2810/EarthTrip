@@ -15,11 +15,17 @@ export const BALANCE = {
 
   /** Cannone personale: ogni modalità si sblocca a parte e sale da Liv. 1 a 10. */
   gun: {
-    singolo: { base: 40, damage: 1.15, cooldown: 0.32, pellets: 1, damagePerLevel: 0.16, ratePerLevel: 0.03 },
-    doppio: { base: 90, damage: 0.8, cooldown: 0.36, pellets: 2, damagePerLevel: 0.12, ratePerLevel: 0.04 },
-    mitra: { base: 140, damage: 0.36, cooldown: 0.085, pellets: 1, damagePerLevel: 0.05, ratePerLevel: 0.06 },
-    rosa: { base: 180, damage: 0.5, cooldown: 0.5, pellets: 7, damagePerLevel: 0.12, ratePerLevel: 0.03 },
+    /** Perforante: proiettile grosso e lento a ricaricare, passa attraverso 2 nemici. */
+    singolo: { base: 40, damage: 1.6, cooldown: 0.42, pellets: 1, damagePerLevel: 0.18, ratePerLevel: 0.03, speed: 7.2, size: 0.058, color: 0x7dfff0, pierce: 2, range: 18, spreadDeg: 0 },
+    /** Due colpi paralleli medi. */
+    doppio: { base: 90, damage: 0.8, cooldown: 0.34, pellets: 2, damagePerLevel: 0.13, ratePerLevel: 0.04, speed: 6.6, size: 0.042, color: 0x9dffb0, pierce: 1, range: 18, spreadDeg: 0 },
+    /** Pioggia di colpi piccoli e veloci, un po' imprecisi. */
+    mitra: { base: 140, damage: 0.28, cooldown: 0.07, pellets: 1, damagePerLevel: 0.05, ratePerLevel: 0.06, speed: 8.2, size: 0.024, color: 0xe6fff8, pierce: 1, range: 18, spreadDeg: 4 },
+    /** Ventaglio a corto raggio: devastante da vicino. */
+    rosa: { base: 180, damage: 0.55, cooldown: 0.62, pellets: 7, damagePerLevel: 0.12, ratePerLevel: 0.03, speed: 5.6, size: 0.034, color: 0xfff1c2, pierce: 1, range: 7, spreadDeg: 42 },
   },
+  /** A ogni livello il proiettile del cannone cresce di questa frazione. */
+  gunSizePerLevel: 0.05,
 
   /** Torrette automatiche. */
   turrets: {
@@ -33,7 +39,16 @@ export const BALANCE = {
   /** Upgrade globali, valgono per tutte le torrette. */
   turretUpgrades: {
     rate: { base: 70, perLevel: 0.07 },
-    calibre: { base: 80, perLevel: 0.14 },
+    calibre: {
+      base: 80,
+      perLevel: 0.18,
+      /** Aspetto dei colpi delle torrette per fascia di livello di Calibro. */
+      tiers: [
+        { from: 0, name: "Leggero", color: 0xffb15a, size: 0.04 },
+        { from: 4, name: "Medio", color: 0xff7a2a, size: 0.056 },
+        { from: 7, name: "Pesante", color: 0xff3355, size: 0.074 },
+      ],
+    },
   },
 
   /**
@@ -46,6 +61,41 @@ export const BALANCE = {
     grappolo: { cost: 180, cooldown: 2.7, damage: 1.4, radius: 0.75, bomblets: 5 },
     ricerca: { cost: 280, cooldown: 3.5, damage: 6.0, radius: 1.0 },
     termobarica: { cost: 450, cooldown: 8.0, damage: 12, radius: 3.4 },
+  },
+
+  /**
+   * Bonus che cadono dai nemici. chance = probabilità che un nemico lasci un bonus;
+   * weights = come si divide tra i tipi. Prima della v19 il gelo pesava 0,30 (1,5% a nemico, 10% a boss).
+   */
+  drops: {
+    chanceTrash: 0.05,
+    chanceBoss: 0.34,
+    weights: { shield: 0.45, freeze: 0.1, repair: 0.45 },
+  },
+
+  /** Nave tesoro: nemico grosso che attraversa lo schermo e spara alla Terra. */
+  treasure: {
+    /** Probabilità che compaia in un'ondata (dalla wave minWave). */
+    chancePerWave: 0.35,
+    minWave: 2,
+    radius: 0.27,
+    hp: 3.5,
+    hpPerWave: 0.9,
+    speed: 0.62,
+    shotEvery: 1.8,
+    /** Distanza minima e massima dalla Terra della sua rotta. */
+    passMin: 1.8,
+    passMax: 3.2,
+    /** Il bonus vale il prezzo della prossima torretta Cannone base, arrotondato a 5. */
+    pickupLife: 7,
+    pickupTapRadius: 0.55,
+  },
+
+  /** Teletrasporto del boss dopo l'impatto sulla Terra. */
+  boss: {
+    teleportTelegraph: 1.0,
+    /** Scarto casuale della destinazione rispetto al lato opposto, in gradi. */
+    teleportJitterDeg: 50,
   },
 
   /** Upgrade dei missili. */

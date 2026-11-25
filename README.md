@@ -19,3 +19,6 @@ La copia statica per GitHub Pages è in `docs/` (`index.html`, `style.css`, `app
 - Ogni livello costa base × 1,35^livello. Tutti i numeri del bilanciamento sono in `src/earth/defense-balance.ts`.
 - La partita si salva a fine ondata e si riprende dalla mini guida. Record e storico delle versioni precedenti restano.
 - Il boss si annuncia, entra nello schermo e non si può colpire prima. Le torrette mirano solo a ciò che è visibile.
+- Shop a schede (Cannone, Torrette, Missili), ognuna divisa tra scelta e potenziamenti.
+- Nave tesoro (35% delle ondate dalla 2): attraversa lo schermo e spara alla Terra. Se la abbatti lascia una moneta che vale la prossima torretta Cannone base; va toccata entro 7 secondi.
+- Prima del teletrasporto il boss manda in tilt il segnale e una freccia verde indica dove ricomparirà.

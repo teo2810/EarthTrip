@@ -1663,3 +1663,82 @@
 .et-boss-arrow.is-warn { animation: et-boss-warn 0.5s ease-in-out infinite alternate; }
 @keyframes et-boss-warn { from { opacity: 0.35; } to { opacity: 1; } }
 .et-bossbar.is-shielded i { background: #9ecbff; opacity: 0.6; }
+
+/* Shop a schede (v19) */
+.et-shop-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.25rem;
+  padding: 0.2rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+}
+.et-shop-tabs button {
+  position: relative;
+  min-height: 2.4rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  touch-action: manipulation;
+}
+.et-shop-tabs button.is-on {
+  background: color-mix(in srgb, #9dffe8 16%, transparent);
+  color: #9dffe8;
+}
+.et-tab-dot {
+  position: absolute;
+  top: 0.45rem;
+  right: 0.7rem;
+  width: 0.38rem;
+  height: 0.38rem;
+  border-radius: 50%;
+  background: #ffb15a;
+}
+.et-modal-scroll section + section { padding-top: 0.55rem; border-top: 1px dashed var(--color-line); }
+
+/* Teletrasporto del boss: effetto glitch */
+.et-glitch {
+  position: fixed;
+  inset: 0;
+  z-index: 24;
+  pointer-events: none;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 0.3rem;
+  background:
+    repeating-linear-gradient(0deg, rgb(93 255 154 / 0.09) 0 1px, transparent 1px 3px),
+    linear-gradient(90deg, rgb(255 0 80 / 0.06), transparent 30%, transparent 70%, rgb(0 200 255 / 0.06));
+  animation: et-glitch-shift 0.18s steps(2) infinite;
+}
+.et-glitch p {
+  position: relative;
+  margin: 0;
+  color: #5dff9a;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  letter-spacing: 0.16em;
+  text-shadow: 2px 0 rgb(255 0 80 / 0.85), -2px 0 rgb(0 200 255 / 0.85);
+  animation: et-glitch-text 0.12s steps(2) infinite;
+}
+.et-glitch small { color: #5dff9a; font-family: var(--font-mono); font-size: 0.66rem; opacity: 0.8; }
+@keyframes et-glitch-shift {
+  0% { transform: translate(0, 0); }
+  50% { transform: translate(2px, -1px); }
+  100% { transform: translate(-2px, 1px); }
+}
+@keyframes et-glitch-text {
+  0% { clip-path: inset(0 0 55% 0); transform: translateX(-3px); }
+  50% { clip-path: inset(40% 0 0 0); transform: translateX(3px); }
+  100% { clip-path: inset(0); transform: translateX(0); }
+}
+.et-boss-arrow.is-tele { color: #5dff9a; animation: et-boss-warn 0.15s steps(2) infinite alternate; }
+.et-boss-arrow.is-tele i { border-left-color: #5dff9a; filter: drop-shadow(0 0 6px #5dff9a); }
+@media (prefers-reduced-motion: reduce) {
+  .et-glitch, .et-glitch p, .et-boss-arrow.is-tele { animation: none; }
+}

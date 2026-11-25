@@ -90,7 +90,15 @@ type Enemy = {
   slow: number;
   /** Il boss diventa colpibile solo dopo essere entrato del tutto nello schermo. */
   entering: number;
+  /** Nave tesoro: attraversa lo schermo, non punta la Terra. */
+  treasure: boolean;
+  vel: THREE.Vector3 | null;
+  seen: boolean;
+  /** Secondi al teletrasporto del boss (0 = nessuno in corso). */
+  tele: number;
+  teleAngle: number;
 };
+type Coin = { mesh: THREE.Group; arc: THREE.Mesh; life: number; value: number; q: number };
 type ShotKind = "bolt" | "bomb" | "msingle" | "rada" | "grappolo" | "ricerca" | "termobarica";
 type Shot = {
   mesh: THREE.Mesh;
@@ -103,6 +111,7 @@ type Shot = {
   pierce: number;
   blast: number;
   blastDmg: number;
+  color: number;
 };
 type Spark = { mesh: THREE.Mesh; vel: THREE.Vector3; life: number };
 type Shard = { mesh: THREE.Mesh; vel: THREE.Vector3; spin: THREE.Vector3 };
@@ -261,6 +270,9 @@ export function createDefenseMode(hooks: DefenseHooks) {
   let fireCooldown = 0;
   let bossWarn = 0;
   let bossWarnAngle = 0;
+  let treasureAt = -1;
+  let teleGhost: THREE.Mesh | null = null;
+  const coins: Coin[] = [];
   let trashQuota = 5;
   let trashSpawned = 0;
   let bossSpawned = false;
@@ -269,7 +281,6 @@ export function createDefenseMode(hooks: DefenseHooks) {
   let phase: "idle" | "enter" | "play" | "exit" | "boom" = "idle";
   let moonRing: THREE.Mesh | null = null;
   let moonArc: THREE.Mesh | null = null;
-  let aimLine: THREE.Line | null = null;
   let cross: THREE.Group | null = null;
   let shieldMesh: THREE.Mesh | null = null;
   let crackGroup: THREE.Group | null = null;
@@ -507,6 +518,10 @@ export function createDefenseMode(hooks: DefenseHooks) {
     trashSpawned = 0;
     bossSpawned = false;
     spawnTimer = 0.45;
+    const t = BALANCE.treasure;
+    treasureAt = state.wave >= t.minWave && Math.random() < t.chancePerWave
+      ? Math.floor(trashQuota * (0.3 + Math.random() * 0.5))
+      : -1;
   }
 
   type ShopAction = { id: string; label: string; cost: number | null; disabled: boolean };
@@ -585,7 +600,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
       },
       {
         key: "up-cal", name: "Calibro", icon: "up-cal", copy: "",
-        stat: `Danno torrette ×${turretDamage().toFixed(2).replace(".", ",")}`,
+        stat: `${calibreTier().name} · danno torrette ×${turretDamage().toFixed(2).replace(".", ",")}`,
         level: state.turretCalibre, max: BALANCE.maxLevel, selected: false, main: null,
         side: upAction("up-cal", tu.calibre.base, state.turretCalibre),
       },
@@ -625,12 +640,43 @@ export function createDefenseMode(hooks: DefenseHooks) {
       },
     );
     const launchers = turrets.some((t) => t.kind === "missile");
+    const pct = (n: number) => `${Math.round(n * 100)}%`;
+    const modes = guns.map((c) => ({ ...c, side: null, level: c.level ? c.level : null }));
+    const powers = guns
+      .filter((c) => (c.level ?? 0) > 0)
+      .map((c) => {
+        const g = BALANCE.gun[c.key.slice(4) as MainGun];
+        return {
+          ...c,
+          key: `pow-${c.key}`,
+          name: `Potenza ${c.name}`,
+          copy: `Ogni livello: danno +${pct(g.damagePerLevel)}, cadenza +${pct(g.ratePerLevel)}, colpo più grosso.`,
+          selected: false,
+          main: null,
+        };
+      });
+    type Group = { key: string; title: string; note: string; cards: ShopCard[] };
+    const tab = (key: string, title: string, groups: Group[]) => ({
+      key,
+      title,
+      groups,
+      ready: groups.some((g) => g.cards.some((c) => [c.main, c.side].some((a) => a && a.cost != null && !a.disabled))),
+    });
     return [
-      { key: "gun", title: "Cannone personale", note: "", cards: guns },
-      { key: "tower", title: `Torrette · ${turrets.length}/${BALANCE.turrets.max}`, note: "Ogni torretta in più costa il 25% in più.", cards: towers },
-      launchers
-        ? { key: "missile", title: "Missili", note: "Più è potente, più tarda a ricaricare.", cards: warheads }
-        : { key: "missile", title: "Missili", note: "Piazza un lancia-missili per scegliere le testate.", cards: [] as ShopCard[] },
+      tab("gun", "Cannone", [
+        { key: "gun-modes", title: "Modalità", note: "Sblocca e scegli il colpo. Le cambi anche in partita.", cards: modes },
+        { key: "gun-pow", title: "Potenziamenti", note: powers.length ? "" : "Sblocca una modalità per potenziarla.", cards: powers },
+      ]),
+      tab("tower", "Torrette", [
+        { key: "tower-place", title: `Piazza · ${turrets.length}/${BALANCE.turrets.max}`, note: "Ogni torretta in più costa il 25% in più.", cards: towers.slice(0, 3) },
+        { key: "tower-pow", title: "Potenziamenti per tutte", note: "", cards: towers.slice(3) },
+      ]),
+      tab("missile", "Missili", launchers
+        ? [
+            { key: "wh", title: "Testate", note: "Più è potente, più tarda a ricaricare.", cards: warheads.slice(0, MISSILES.length) },
+            { key: "wh-pow", title: "Potenziamenti", note: "", cards: warheads.slice(MISSILES.length) },
+          ]
+        : [{ key: "wh", title: "Testate", note: "Piazza un lancia-missili (scheda Torrette) per scegliere le testate.", cards: [] }]),
     ];
   }
 
@@ -638,7 +684,9 @@ export function createDefenseMode(hooks: DefenseHooks) {
     const bossE = enemies.find((e) => e.boss);
     const ownedGuns = GUNS.filter((id) => state.gunLevels[id] > 0);
     const bossOff = bossE && !onScreen(bossE.mesh.position, 0);
-    const bossHint = bossWarn > 0
+    const bossHint = bossE && bossE.tele > 0
+      ? { angle: bossE.teleAngle, warn: false, tele: true }
+      : bossWarn > 0
       ? { angle: bossWarnAngle, warn: true }
       : bossOff
         ? { angle: Math.atan2(bossE.mesh.position.y, bossE.mesh.position.x), warn: false }
@@ -664,7 +712,10 @@ export function createDefenseMode(hooks: DefenseHooks) {
       turretCount: turrets.length,
       turretMax: BALANCE.turrets.max,
       guns: ownedGuns.map((id) => ({ id: `gun-${id}`, name: GUN_NAME[id], level: state.gunLevels[id], selected: state.mainGun === id })),
-      sections: shopModel(),
+      tabs: shopModel(),
+      bossTele: bossE && bossE.tele > 0 ? { angle: bossE.teleAngle, left: bossE.tele / BALANCE.boss.teleportTelegraph } : null,
+      treasure: enemies.some((e) => e.treasure),
+      coins: coins.map((c) => ({ left: c.life, value: c.value })),
     };
   }
 
@@ -901,21 +952,6 @@ export function createDefenseMode(hooks: DefenseHooks) {
   }
 
   function ensureAimGfx() {
-    if (!aimLine) {
-      const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 1, 0)]);
-      const mat = new THREE.LineDashedMaterial({
-        color: 0x9dffe8,
-        dashSize: 0.16,
-        gapSize: 0.1,
-        transparent: true,
-        opacity: 0.9,
-        depthTest: false,
-      });
-      aimLine = new THREE.Line(geo, mat);
-      aimLine.computeLineDistances();
-      aimLine.renderOrder = 8;
-      hooks.getScene().add(aimLine);
-    }
     if (!cross) {
       cross = new THREE.Group();
       const mat = new THREE.LineBasicMaterial({ color: 0xe9fff8, transparent: true, opacity: 0.95, depthTest: false });
@@ -952,22 +988,8 @@ export function createDefenseMode(hooks: DefenseHooks) {
   }
 
   function updateAimGfx() {
-    if (!aimLine || !cross || !cannons[0]) return;
-    const a = cannons[0].rotation.z;
-    const muzzle = new THREE.Vector3(
-      cannons[0].position.x + Math.cos(a) * 0.38,
-      cannons[0].position.y + Math.sin(a) * 0.38,
-      0.06,
-    );
-    const tip = aimPoint.clone();
-    tip.z = 0.06;
-    const pos = aimLine.geometry.getAttribute("position") as THREE.BufferAttribute;
-    pos.setXYZ(0, muzzle.x, muzzle.y, muzzle.z);
-    pos.setXYZ(1, tip.x, tip.y, tip.z);
-    pos.needsUpdate = true;
-    aimLine.computeLineDistances();
-    cross.position.copy(tip);
-    aimLine.visible = phase === "play" && !state.shop;
+    if (!cross) return;
+    cross.position.set(aimPoint.x, aimPoint.y, 0.06);
     cross.visible = phase === "play" && !state.shop;
   }
 
@@ -1087,6 +1109,11 @@ export function createDefenseMode(hooks: DefenseHooks) {
       shotT: 0.85,
       slow: 0,
       entering: boss ? 1 : 0,
+      treasure: false,
+      vel: null,
+      seen: false,
+      tele: 0,
+      teleAngle: 0,
     });
     if (boss) burst(mesh.position, 0xffb15a, 18);
   }
@@ -1126,22 +1153,141 @@ export function createDefenseMode(hooks: DefenseHooks) {
   }
 
   function rollDrop(boss: boolean) {
-    const chance = boss ? 0.34 : 0.05;
-    if (Math.random() > chance) return null;
-    const roll = Math.random();
-    if (roll < 0.38) return "shield" as const;
-    if (roll < 0.68) return "freeze" as const;
+    const d = BALANCE.drops;
+    if (Math.random() > (boss ? d.chanceBoss : d.chanceTrash)) return null;
+    const w = d.weights;
+    let roll = Math.random() * (w.shield + w.freeze + w.repair);
+    if ((roll -= w.shield) < 0) return "shield" as const;
+    if ((roll -= w.freeze) < 0) return "freeze" as const;
     return "repair" as const;
+  }
+
+  function coinValue() {
+    return Math.max(5, Math.round(turretPrice("cannon", turrets.length) / 5) * 5);
+  }
+
+  function spawnCoin(pos: THREE.Vector3) {
+    const group = new THREE.Group();
+    const disc = new THREE.Mesh(
+      new THREE.CircleGeometry(0.2, 24),
+      new THREE.MeshBasicMaterial({ color: 0xffd24a, depthTest: false }),
+    );
+    const mark = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.22, 0.02), new THREE.MeshBasicMaterial({ color: 0x7a4a00, depthTest: false }));
+    const glow = new THREE.Mesh(
+      new THREE.RingGeometry(0.22, 0.27, 32),
+      new THREE.MeshBasicMaterial({ color: 0xfff1a8, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthTest: false }),
+    );
+    const arc = new THREE.Mesh(
+      new THREE.RingGeometry(0.3, 0.36, 48, 1, Math.PI / 2, Math.PI * 2),
+      new THREE.MeshBasicMaterial({ color: 0xffe27a, transparent: true, opacity: 0.95, side: THREE.DoubleSide, depthTest: false }),
+    );
+    for (const m of [glow, disc, mark, arc]) m.renderOrder = 10;
+    group.add(glow, disc, mark, arc);
+    // resta toccabile: lontano dalla barra in basso, dall'intestazione e dallo zoom
+    const v = viewHalf();
+    const px = (2 * v.h) / Math.max(1, window.innerHeight);
+    const x = THREE.MathUtils.clamp(pos.x, -v.w + 40 * px, v.w - 70 * px);
+    const y = THREE.MathUtils.clamp(pos.y, -v.h + 150 * px, v.h - 120 * px);
+    group.position.set(x, y, 0.1);
+    hooks.getScene().add(group);
+    coins.push({ mesh: group, arc, life: BALANCE.treasure.pickupLife, value: coinValue(), q: -1 });
+  }
+
+  function tickCoins(dt: number) {
+    const life = BALANCE.treasure.pickupLife;
+    for (let i = coins.length - 1; i >= 0; i -= 1) {
+      const c = coins[i];
+      c.life -= dt;
+      if (c.life <= 0) {
+        burst(c.mesh.position, 0x8a7a50, 6);
+        disposeObject(c.mesh);
+        coins.splice(i, 1);
+        continue;
+      }
+      const q = Math.ceil((c.life / life) * 60);
+      if (q !== c.q) {
+        c.q = q;
+        c.arc.geometry.dispose();
+        c.arc.geometry = new THREE.RingGeometry(0.3, 0.36, 48, 1, Math.PI / 2, Math.max(0.02, (c.life / life) * Math.PI * 2));
+      }
+      const blink = c.life < 2 ? 0.5 + 0.5 * Math.sin(performance.now() * 0.025) : 1;
+      c.mesh.scale.setScalar((1 + Math.sin(performance.now() * 0.006) * 0.06) * (0.75 + 0.25 * blink));
+    }
+  }
+
+  function collectAt(p: THREE.Vector3) {
+    const r = BALANCE.treasure.pickupTapRadius;
+    for (let i = coins.length - 1; i >= 0; i -= 1) {
+      const c = coins[i];
+      if (Math.hypot(c.mesh.position.x - p.x, c.mesh.position.y - p.y) > r) continue;
+      state.exp += c.value;
+      state.score += c.value;
+      burst(c.mesh.position, 0xffd24a, 18);
+      disposeObject(c.mesh);
+      coins.splice(i, 1);
+      return true;
+    }
+    return false;
+  }
+
+  function spawnTreasure() {
+    const t = BALANCE.treasure;
+    const a = Math.random() * Math.PI * 2;
+    const start = new THREE.Vector3(Math.cos(a), Math.sin(a), 0).multiplyScalar(edgeDist(a) + t.radius * 2 + 0.3);
+    const side = Math.random() < 0.5 ? 1 : -1;
+    const pass = new THREE.Vector3(-Math.sin(a), Math.cos(a), 0).multiplyScalar(side * (t.passMin + Math.random() * (t.passMax - t.passMin)));
+    const vel = pass.clone().sub(start).normalize().multiplyScalar(t.speed);
+    const mesh = new THREE.Mesh(
+      new THREE.OctahedronGeometry(t.radius, 0),
+      new THREE.MeshStandardMaterial({ color: 0xffd24a, emissive: 0x6a4a00, emissiveIntensity: 0.9, metalness: 0.6, roughness: 0.3 }),
+    );
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(t.radius * 1.5, 0.025, 6, 28),
+      new THREE.MeshBasicMaterial({ color: 0xfff1a8, transparent: true, opacity: 0.85 }),
+    );
+    mesh.add(ring);
+    mesh.position.copy(start);
+    hooks.getScene().add(mesh);
+    const hp = t.hp + state.wave * t.hpPerWave;
+    enemies.push({
+      mesh, speed: t.speed, hp, maxHp: hp, boss: false, radius: t.radius, mode: "strafe", modeT: 0,
+      strafe: side, shotT: 1.2, slow: 0, entering: 0, treasure: true, vel, seen: false, tele: 0, teleAngle: 0,
+    });
+  }
+
+  function clearTeleGhost() {
+    if (!teleGhost) return;
+    disposeObject(teleGhost);
+    teleGhost = null;
+  }
+
+  /** Sagoma tremolante del boss dove ricomparirà. */
+  function syncTeleGhost(e: Enemy) {
+    if (!teleGhost) {
+      teleGhost = new THREE.Mesh(
+        new THREE.IcosahedronGeometry(e.radius, 0),
+        new THREE.MeshBasicMaterial({ color: 0x5dff9a, wireframe: true, transparent: true, opacity: 0.8, depthTest: false }),
+      );
+      teleGhost.renderOrder = 11;
+      hooks.getScene().add(teleGhost);
+    }
+    const h = bossHold(e.radius);
+    teleGhost.position.set(Math.cos(e.teleAngle) * h + (Math.random() - 0.5) * 0.12, Math.sin(e.teleAngle) * h, 0);
+    teleGhost.visible = Math.random() > 0.35;
+    teleGhost.rotation.z += 0.3;
+    (teleGhost.material as THREE.MeshBasicMaterial).opacity = 0.35 + (1 - e.tele / BALANCE.boss.teleportTelegraph) * 0.6;
   }
 
   function killEnemy(index: number) {
     const e = enemies[index];
     if (!e) return;
     const wasBoss = e.boss;
-    gain(wasBoss ? 60 + state.wave * 3 : 6 + state.wave, wasBoss ? 16 : 3);
-    burst(e.mesh.position, wasBoss ? 0xffb15a : 0xff6688, wasBoss ? 26 : 10);
-    const drop = rollDrop(wasBoss);
+    gain(wasBoss ? 60 + state.wave * 3 : e.treasure ? 10 + state.wave : 6 + state.wave, wasBoss ? 16 : 3);
+    burst(e.mesh.position, wasBoss ? 0xffb15a : e.treasure ? 0xffd24a : 0xff6688, wasBoss || e.treasure ? 26 : 10);
+    if (e.treasure) spawnCoin(e.mesh.position.clone());
+    const drop = e.treasure ? null : rollDrop(wasBoss);
     if (drop) spawnDrop(e.mesh.position.clone(), drop);
+    if (wasBoss) clearTeleGhost();
     disposeObject(e.mesh);
     enemies.splice(index, 1);
     if (!wasBoss) return;
@@ -1177,8 +1323,8 @@ export function createDefenseMode(hooks: DefenseHooks) {
     if (state.earthHP <= 0) beginBoom();
   }
 
-  function fireBolt(angle: number, kind: ShotKind, speed: number, damage: number, color: number, range: number, life: number, pierce = 1, blast = 0, blastDmg = 0, side = 0) {
-    const rad = kind === "bolt" ? 0.04 : kind === "bomb" ? 0.075 : kind === "termobarica" ? 0.12 : kind === "ricerca" ? 0.095 : 0.062;
+  function fireBolt(angle: number, kind: ShotKind, speed: number, damage: number, color: number, range: number, life: number, pierce = 1, blast = 0, blastDmg = 0, side = 0, size = 0) {
+    const rad = size > 0 ? size : kind === "bolt" ? 0.04 : kind === "bomb" ? 0.075 : kind === "termobarica" ? 0.12 : kind === "ricerca" ? 0.095 : 0.062;
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(rad, 6, 6),
       new THREE.MeshBasicMaterial({ color }),
@@ -1199,31 +1345,40 @@ export function createDefenseMode(hooks: DefenseHooks) {
       pierce,
       blast,
       blastDmg,
+      color,
     });
   }
 
   function fireMainOnce() {
     const id = state.mainGun;
+    const g = BALANCE.gun[id];
     const st = gunStats(id);
+    const size = g.size * (1 + BALANCE.gunSizePerLevel * (Math.max(1, state.gunLevels[id]) - 1));
+    const life = g.range / g.speed + 0.2;
+    const spread = (g.spreadDeg * Math.PI) / 180;
     if (id === "rosa") {
-      const span = 0.72;
       for (let i = 0; i < st.pellets; i += 1) {
-        const a = aimAngle - span / 2 + (span * i) / (st.pellets - 1);
-        fireBolt(a, "bolt", 6.3, st.damage, 0xfff1c2, 11, 1.35);
+        const a = aimAngle - spread / 2 + (spread * i) / (st.pellets - 1);
+        fireBolt(a, "bolt", g.speed, st.damage, g.color, g.range, life, g.pierce, 0, 0, 0, size);
       }
       return;
     }
+    const a = aimAngle + (Math.random() - 0.5) * spread;
     if (id === "doppio") {
-      fireBolt(aimAngle, "bolt", 6.6, st.damage, 0x9dffe8, 18, 2.3, 1, 0, 0, -0.07);
-      fireBolt(aimAngle, "bolt", 6.6, st.damage, 0x9dffe8, 18, 2.3, 1, 0, 0, 0.07);
+      fireBolt(a, "bolt", g.speed, st.damage, g.color, g.range, life, g.pierce, 0, 0, -0.07, size);
+      fireBolt(a, "bolt", g.speed, st.damage, g.color, g.range, life, g.pierce, 0, 0, 0.07, size);
       return;
     }
-    const speed = id === "mitra" ? 7.4 : 6.4;
-    const color = id === "mitra" ? 0xb8fff4 : 0x7dfff0;
-    fireBolt(aimAngle, "bolt", speed, st.damage, color, 18, 2.3);
+    fireBolt(a, "bolt", g.speed, st.damage, g.color, g.range, life, g.pierce, 0, 0, 0, size);
   }
 
-  /** Bersaglio più allineato dentro il cono, solo tra quelli visibili sullo schermo. */
+  function calibreTier() {
+    const tiers = BALANCE.turretUpgrades.calibre.tiers;
+    let t: (typeof tiers)[number] = tiers[0];
+    for (const x of tiers) if (state.turretCalibre >= x.from) t = x;
+    return t;
+  }
+
   function coneAim(facing: number, cone: number, maxDist = Infinity) {
     let best: { angle: number; dist: number } | null = null;
     let bestAbs = cone + 1e-6;
@@ -1267,11 +1422,13 @@ export function createDefenseMode(hooks: DefenseHooks) {
     }
     if (t.kind === "mortar") {
       const range = THREE.MathUtils.clamp(aim.dist - RIM - 0.28, 0.6, cfg.mortar.reach);
-      fireBolt(aim.angle, "bomb", 3.25, 0, 0xff7a3a, range, 0.5, 1, cfg.mortar.radius, cfg.mortar.damage * cal);
+      const tier = calibreTier();
+      fireBolt(aim.angle, "bomb", 3.25, 0, tier.color, range, 0.5, 1, cfg.mortar.radius, cfg.mortar.damage * cal, 0, tier.size * 1.7);
       t.cd = cfg.mortar.cooldown * turretRate();
       return true;
     }
-    fireBolt(t.angle, "bolt", 5.6, cfg.cannon.damage * cal, 0xffb15a, 16, 2.2);
+    const tier = calibreTier();
+    fireBolt(t.angle, "bolt", 5.6, cfg.cannon.damage * cal, tier.color, 16, 2.2, 1, 0, 0, 0, tier.size);
     t.cd = cfg.cannon.cooldown * turretRate();
     return true;
   }
@@ -1357,12 +1514,13 @@ export function createDefenseMode(hooks: DefenseHooks) {
     drops.length = 0;
     for (const h of hostiles) disposeObject(h.mesh);
     hostiles.length = 0;
+    for (const c of coins) disposeObject(c.mesh);
+    coins.length = 0;
+    clearTeleGhost();
     clearShield();
-    if (aimLine) hooks.getScene().remove(aimLine);
     if (cross) hooks.getScene().remove(cross);
     if (moonRing) hooks.getScene().remove(moonRing);
     if (moonArc) hooks.getScene().remove(moonArc);
-    aimLine = null;
     cross = null;
     moonRing = null;
     moonArc = null;
@@ -1420,8 +1578,10 @@ export function createDefenseMode(hooks: DefenseHooks) {
     drops.length = 0;
     for (const h of hostiles) disposeObject(h.mesh);
     hostiles.length = 0;
+    for (const c of coins) disposeObject(c.mesh);
+    coins.length = 0;
+    clearTeleGhost();
     clearShield();
-    if (aimLine) aimLine.visible = false;
     if (cross) cross.visible = false;
     for (const cannon of cannons) cannon.visible = false;
     for (const t of turrets) t.mesh.visible = false;
@@ -1640,7 +1800,11 @@ export function createDefenseMode(hooks: DefenseHooks) {
       state.freezeLeft = Math.max(0, state.freezeLeft - dt);
       if (state.freezeLeft === 0) syncShield();
     } else if (!state.shop && state.freezeLeft <= 0 && !bossSpawned) {
-      const trashAlive = enemies.some((e) => !e.boss);
+      const trashAlive = enemies.some((e) => !e.boss && !e.treasure);
+      if (treasureAt >= 0 && trashSpawned >= treasureAt) {
+        treasureAt = -1;
+        spawnTreasure();
+      }
       spawnTimer += dt;
       if (trashSpawned < trashQuota) {
         const every = Math.max(0.28, 0.78 - state.wave * 0.04);
@@ -1688,7 +1852,24 @@ export function createDefenseMode(hooks: DefenseHooks) {
             else pos.addScaledVector(pos.clone().negate().normalize(), Math.max(0.9, pace * 2.2) * dt);
           }
           const diving = e.entering <= 0 && e.hp <= e.maxHp * 0.25;
-          if (e.entering > 0) {
+          if (e.tele > 0) {
+            e.tele = Math.max(0, e.tele - dt);
+            const j = 0.07;
+            e.mesh.position.x += (Math.random() - 0.5) * j;
+            e.mesh.position.y += (Math.random() - 0.5) * j;
+            e.mesh.visible = Math.random() > 0.3;
+            e.mesh.scale.set(1 + (Math.random() - 0.5) * 0.5, 1 + (Math.random() - 0.5) * 0.5, 1);
+            syncTeleGhost(e);
+            if (e.tele === 0) {
+              const h = bossHold(e.radius);
+              burst(e.mesh.position, 0x5dff9a, 18);
+              e.mesh.position.set(Math.cos(e.teleAngle) * h, Math.sin(e.teleAngle) * h, 0);
+              e.mesh.visible = true;
+              e.mesh.scale.set(1, 1, 1);
+              burst(e.mesh.position, 0x5dff9a, 18);
+              clearTeleGhost();
+            }
+          } else if (e.entering > 0) {
             /* entra nello schermo prima di tutto il resto */
           } else if (diving) {
             pos.addScaledVector(pos.clone().negate().normalize(), Math.min(0.62, pace + 0.18) * dt);
@@ -1707,6 +1888,24 @@ export function createDefenseMode(hooks: DefenseHooks) {
               for (let s = 0; s < n; s += 1) spawnHostile(e.mesh.position, e.radius);
             }
           }
+        } else if (e.treasure && e.vel) {
+          e.mesh.position.addScaledVector(e.vel, (pace / e.speed) * dt);
+          const ring = e.mesh.children[0];
+          if (ring) ring.rotation.x += dt * 2;
+          const vis = onScreen(e.mesh.position, 0);
+          if (vis) e.seen = true;
+          if (vis) {
+            e.shotT -= dt;
+            if (e.shotT <= 0) {
+              e.shotT = BALANCE.treasure.shotEvery;
+              spawnHostile(e.mesh.position, e.radius);
+            }
+          }
+          if (e.seen && !vis) {
+            disposeObject(e.mesh);
+            enemies.splice(i, 1);
+            continue;
+          }
         } else {
           const dir = e.mesh.position.clone().negate().normalize();
           e.mesh.position.addScaledVector(dir, pace * dt);
@@ -1715,7 +1914,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
       }
       const moonHit = e.radius + 0.32;
       if (e.boss) e.modeT = Math.max(0, e.modeT - dt);
-      if (e.mesh.position.distanceTo(moonPos) < moonHit && targetable(e)) {
+      if (!e.treasure && e.mesh.position.distanceTo(moonPos) < moonHit && targetable(e)) {
         burst(e.mesh.position, 0x9ecbff, e.boss ? 16 : 12);
         if (!e.boss) {
           killEnemy(i);
@@ -1730,16 +1929,17 @@ export function createDefenseMode(hooks: DefenseHooks) {
           }
         }
       }
-      if (frozen) continue;
+      if (frozen || e.tele > 0) continue;
       if (e.mesh.position.length() < 1.02 + e.radius) {
         const dmg = e.boss ? 12 + state.wave * 2 : 6 + state.wave;
         const pos = e.mesh.position.clone();
         if (e.boss) {
-          const left = Math.max(1, e.hp);
           const away = Math.atan2(pos.y, pos.x) + Math.PI;
-          const back = 4.6;
-          e.mesh.position.set(Math.cos(away) * back, Math.sin(away) * back, 0);
-          e.hp = left;
+          const jit = (BALANCE.boss.teleportJitterDeg * Math.PI) / 180;
+          e.hp = Math.max(1, e.hp);
+          e.tele = BALANCE.boss.teleportTelegraph;
+          e.teleAngle = away + (Math.random() * 2 - 1) * jit;
+          e.mesh.position.copy(pos.clone().normalize().multiplyScalar(1.08 + e.radius));
           burst(pos, 0xff8a1e, 14);
           hurtEarth(dmg, pos);
           if (phase !== "play") return;
@@ -1792,6 +1992,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
       }
     }
 
+    if (!frozen && !state.shop) tickCoins(dt);
     fireCooldown -= dt;
     for (const t of turrets) t.cd = Math.max(0, t.cd - dt);
     const threats = enemies.length > 0 || hostiles.length > 0;
@@ -1855,7 +2056,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
           const reach = enemies[j].radius + (p.kind === "bolt" ? 0.16 : 0.26);
           if (p.mesh.position.distanceTo(enemies[j].mesh.position) > reach) continue;
           enemies[j].hp -= p.damage;
-          burst(p.mesh.position, 0xffd27a, 4);
+          burst(p.mesh.position, p.color, Math.min(14, 3 + Math.round(p.damage * 3)));
           if (enemies[j].hp <= 0) killEnemy(j);
           if (p.pierce > 1) {
             p.pierce -= 1;
@@ -1905,6 +2106,8 @@ export function createDefenseMode(hooks: DefenseHooks) {
     if (phase !== "play" || state.over) return;
     if (!readPointer(e)) return;
     if (!raycaster.ray.intersectPlane(plane, hit)) return;
+    const down = e.type === "pointerdown" || e.type === "touchstart";
+    if (down && !state.shop && !place && collectAt(hit)) return;
     if (hit.length() < 0.45) return;
     const a = Math.atan2(hit.y, hit.x);
     if (place) {
@@ -1992,6 +2195,9 @@ export function createDefenseMode(hooks: DefenseHooks) {
     for (const p of projectiles) hooks.getScene().remove(p.mesh);
     for (const h of hostiles) hooks.getScene().remove(h.mesh);
     for (const d of drops) hooks.getScene().remove(d.mesh);
+    for (const c of coins) disposeObject(c.mesh);
+    coins.length = 0;
+    clearTeleGhost();
     enemies.length = 0;
     projectiles.length = 0;
     hostiles.length = 0;
@@ -2163,13 +2369,38 @@ export function createDefenseMode(hooks: DefenseHooks) {
       zoomGoal,
       camZ: hooks.getCamera().position.z,
       bossWarn,
-      enemies: enemies.map((e) => ({ boss: e.boss, entering: e.entering, hp: e.hp, maxHp: e.maxHp, x: e.mesh.position.x, y: e.mesh.position.y, radius: e.radius, onScreen: onScreen(e.mesh.position, e.boss ? e.radius : 0), targetable: targetable(e) })),
+      coins: coins.length,
+      hostiles: hostiles.length,
+      enemies: enemies.map((e) => ({ treasure: e.treasure, tele: e.tele, teleAngle: e.teleAngle, boss: e.boss, entering: e.entering, hp: e.hp, maxHp: e.maxHp, x: e.mesh.position.x, y: e.mesh.position.y, radius: e.radius, onScreen: onScreen(e.mesh.position, e.boss ? e.radius : 0), targetable: targetable(e) })),
       turrets: turrets.map((t) => ({ kind: t.kind, cd: t.cd })),
       cooldowns: Object.fromEntries(MISSILES.map((id) => [id, warheadCooldown(id)])),
       gun: gunStats(state.mainGun),
     }),
     addExp: (n: number) => {
       state.exp += n;
+    },
+    rollDrop: (boss: boolean) => rollDrop(boss),
+    spawnTreasure: () => spawnTreasure(),
+    killTreasure: () => {
+      const i = enemies.findIndex((e) => e.treasure);
+      if (i >= 0) killEnemy(i);
+      return i >= 0;
+    },
+    coinValue: () => coinValue(),
+    coinScreen: () => {
+      const cam = hooks.getCamera();
+      const canvas = document.querySelector("canvas");
+      if (!canvas) return [];
+      const r = canvas.getBoundingClientRect();
+      return coins.map((c) => {
+        const v = c.mesh.position.clone().project(cam);
+        return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height, left: c.life, value: c.value };
+      });
+    },
+    bossHurt: (frac: number) => {
+      const b = enemies.find((e) => e.boss);
+      if (b) b.hp = b.maxHp * frac;
+      return Boolean(b);
     },
   };
 

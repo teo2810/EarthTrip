@@ -673,10 +673,10 @@ const OFFER_ICON: Record<string, () => ReactNode> = {
 };
 
 const OFFER_COPY: Record<string, string> = {
-  "gun-singolo": "Un colpo dritto e preciso. Ogni livello ne alza il danno.",
+  "gun-singolo": "Colpo grosso e perforante: passa due nemici.",
   "gun-doppio": "Due colpi paralleli sullo stesso mirino.",
-  "gun-mitra": "Fuoco continuo: ogni livello spara più veloce.",
-  "gun-rosa": "Ventaglio di pallini, come un colpo a pompa.",
+  "gun-mitra": "Pioggia di colpi piccoli, un po' imprecisi.",
+  "gun-rosa": "Ventaglio a corto raggio, come un colpo a pompa.",
   "arm-cannon": "Spara in avanti, ±10°, e non ruota.",
   "arm-missile": "Lunga gittata. Lancia la testata scelta sotto.",
   "arm-mortar": "Bomba ad area sui nemici vicini, lenta.",
@@ -696,6 +696,7 @@ type ShopCard = {
   key: string;
   name: string;
   icon: string;
+  copy?: string;
   stat: string;
   level: number | null;
   max: number;
@@ -704,6 +705,7 @@ type ShopCard = {
   side: ShopAction | null;
 };
 type ShopSection = { key: string; title: string; note: string; cards: ShopCard[] };
+type ShopTab = { key: string; title: string; ready: boolean; groups: ShopSection[] };
 type HudState = {
   wave: number;
   earthHP: number;
@@ -726,11 +728,12 @@ type HudState = {
   shopKind?: "wave" | "freeze" | null;
   guide?: boolean;
   resume?: { wave: number; exp: number } | null;
-  bossHint?: { angle: number; warn?: boolean } | null;
+  bossHint?: { angle: number; warn?: boolean; tele?: boolean } | null;
   placing?: string | null;
   placeMsg?: string;
   guns?: { id: string; name: string; level: number; selected: boolean }[];
-  sections?: ShopSection[];
+  tabs?: ShopTab[];
+  bossTele?: { angle: number; left: number } | null;
   lastRun?: { score: number; wave: number } | null;
 };
 
@@ -783,8 +786,6 @@ function ZoomRail({ value, onChange }: { value: number; onChange: (t: number) =>
 function ShopCardView({ card, exp, buy }: { card: ShopCard; exp: number; buy: (id: string) => void }) {
   const Icon = OFFER_ICON[card.icon] ?? IconSingle;
   const price = (a: ShopAction) => (a.cost == null ? a.label : `${a.label} · ${a.cost}`);
-  const tail = (a: ShopAction | null) =>
-    a && a.cost != null && !a.disabled ? ` Restano ${Math.max(0, exp - a.cost)}.` : "";
   const main = card.main;
   const side = card.side;
   return (
@@ -796,8 +797,7 @@ function ShopCardView({ card, exp, buy }: { card: ShopCard; exp: number; buy: (i
           {card.level != null && card.max > 0 ? <i className="et-lvl">Liv. {card.level}/{card.max}</i> : null}
         </b>
         <small>
-          {OFFER_COPY[card.key] ?? ""} {card.stat ? <span className="et-stat">{card.stat}.</span> : null}
-          {tail(side ?? main)}
+          {card.copy || OFFER_COPY[card.key] || ""} {card.stat ? <span className="et-stat">{card.stat}.</span> : null}
         </small>
       </span>
       <span className="et-buy-acts">
@@ -847,6 +847,9 @@ function DefenseHud({ state, api }: { state: HudState; api: { current: EarthApi 
   };
   const hint = state.bossHint;
   const resume = state.resume;
+  const tabs = state.tabs ?? [];
+  const [tabKey, setTabKey] = useState("gun");
+  const tab = tabs.find((t) => t.key === tabKey) ?? tabs[0];
   return (
     <>
       <div className={frozen ? "et-def-hud is-frozen" : "et-def-hud"}>
@@ -900,7 +903,7 @@ function DefenseHud({ state, api }: { state: HudState; api: { current: EarthApi 
       </div>
       {hint && !shop && !guide && !placing ? (
         <div
-          className={hint.warn ? "et-boss-arrow is-warn" : "et-boss-arrow"}
+          className={hint.tele ? "et-boss-arrow is-tele" : hint.warn ? "et-boss-arrow is-warn" : "et-boss-arrow"}
           style={{
             left: `${edgeSpot(hint.angle).x}px`,
             top: `${edgeSpot(hint.angle).y}px`,
@@ -908,7 +911,13 @@ function DefenseHud({ state, api }: { state: HudState; api: { current: EarthApi 
           }}
         >
           <i style={{ transform: `rotate(${-hint.angle}rad)` }} />
-          {hint.warn ? "Boss in arrivo" : "Boss"}
+          {hint.tele ? "Teletrasporto" : hint.warn ? "Boss in arrivo" : "Boss"}
+        </div>
+      ) : null}
+      {state.bossTele && !shop && !guide ? (
+        <div className="et-glitch" aria-hidden="true">
+          <p data-text="SEGNALE BOSS // RIPOSIZIONAMENTO">SEGNALE BOSS // RIPOSIZIONAMENTO</p>
+          <small>{`0x${Math.floor(state.bossTele.left * 4095).toString(16).padStart(3, "0").toUpperCase()} · ${Math.round(state.bossTele.left * 100)}%`}</small>
         </div>
       ) : null}
       {placing ? (
@@ -933,7 +942,8 @@ function DefenseHud({ state, api }: { state: HudState; api: { current: EarthApi 
               <li>I punti si spendono a fine ondata. Ogni livello costa il 35% in più del precedente: scegli cosa potenziare.</li>
               <li>Fino a 8 torrette: Cannone base, Lancia-missili e Mortaio. Ogni torretta in più costa il 25% in più.</li>
               <li>Le testate più potenti dei missili ricaricano più lentamente. La Termobarica è la più lenta.</li>
-              <li>Il boss si annuncia con una freccia, entra nello schermo e finché non è entrato non si può colpire.</li>
+              <li>Il boss si annuncia con una freccia, entra nello schermo e finché non è entrato non si può colpire. Prima di teletrasportarsi il segnale va in tilt e una freccia verde indica dove ricomparirà.</li>
+              <li>A volte passa una nave tesoro dorata che spara alla Terra. Se la abbatti lascia una moneta: toccala prima che l'anello si svuoti.</li>
               <li>La super della Luna si carica distruggendo nemici. A anello pieno, tocca la Luna o il pulsante in basso: spazza nemici e colpi, ma il boss ne è immune.</li>
             </ol>
             {resume ? (
@@ -962,8 +972,23 @@ function DefenseHud({ state, api }: { state: HudState; api: { current: EarthApi 
                 <p className="et-wallet">Hai <b>{exp}</b> punti</p>
               </div>
             </header>
+            <div className="et-shop-tabs" role="tablist" aria-label="Sezioni dello shop">
+              {tabs.map((t) => (
+                <button
+                  key={t.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={t.key === tab?.key}
+                  className={t.key === tab?.key ? "is-on" : ""}
+                  onClick={() => setTabKey(t.key)}
+                >
+                  {t.title}
+                  {t.ready ? <i className="et-tab-dot" aria-label="qualcosa da comprare" /> : null}
+                </button>
+              ))}
+            </div>
             <div className="et-modal-scroll">
-              {(state.sections ?? []).map((sec) => (
+              {(tab?.groups ?? []).map((sec) => (
                 <section key={sec.key}>
                   <p className="et-buy-sec">{sec.title}</p>
                   {sec.note ? <p className="et-buy-note">{sec.note}</p> : null}
