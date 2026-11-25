@@ -722,7 +722,7 @@ const OFFER_COPY: Record<string, string> = {
   slow: "Rallenta i nemici nella zona dell'esplosione.",
   homing: "Il più forte: segue il bersaglio. Si sblocca per ultimo.",
   "arm-cannon": "Torretta fissa. Spara solo in avanti, ±10°, e non ruota.",
-  "arm-missile": "Torretta fissa. Lancia un missile solo nel cono stretto di ±2°.",
+  "arm-missile": "Torretta fissa. Il tiro resta ±2°, ma il cono oscilla su ±10°.",
 };
 
 function ZoomRail({ value, onChange }: { value: number; onChange: (t: number) => void }) {
@@ -829,6 +829,13 @@ function DefenseHud({
     const locked = item.open === false && !item.owned;
     const poor = !item.owned && exp < item.cost;
     const Icon = OFFER_ICON[item.id] ?? IconSingle;
+    const left = exp - item.cost;
+    const price = item.owned ? (item.selected ? "In uso" : "Usa") : poor ? `${item.cost}` : `−${item.cost}`;
+    const detail = locked
+      ? "Si sblocca per ultimo, dopo gli altri missili."
+      : item.owned
+        ? OFFER_COPY[item.id]
+        : `${OFFER_COPY[item.id]} Costa ${item.cost}, te ne restano ${Math.max(0, left)}.`;
     return (
       <button
         key={item.id}
@@ -840,12 +847,19 @@ function DefenseHud({
         <Icon />
         <span>
           <b>{item.name}</b>
-          <small>{locked ? "Si sblocca per ultimo, dopo gli altri missili." : OFFER_COPY[item.id]}</small>
+          <small>{detail}</small>
         </span>
-        <em>{item.owned ? (item.selected ? "Attivo" : "Tuo") : item.cost}</em>
+        <em>{price}</em>
       </button>
     );
   }
+  const ownedGuns = (state.guns ?? []).filter((g) => g.owned);
+  const gunShort: Record<string, string> = {
+    "gun-singolo": "1",
+    "gun-raffica": "Raf",
+    "gun-mitra": "Mit",
+    "gun-rosa": "Rosa",
+  };
   const hint = state.bossHint;
   return (
     <>
@@ -888,6 +902,15 @@ function DefenseHud({
             <i style={{ width: `${Math.max(0, Math.min(100, ((state.bossHp ?? 0) / bossMax) * 100))}%` }} />
           </span>
         ) : null}
+        {ownedGuns.length > 1 && !shop && !guide ? (
+          <div className="et-gun-switch" role="group" aria-label="Colpo del cannone">
+            {ownedGuns.map((g) => (
+              <button key={g.id} type="button" className={g.selected ? "is-on" : ""} onClick={() => buy(g.id)}>
+                {gunShort[g.id] ?? g.name}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
       {hint && !shop && !guide && !placing ? (
         <div
@@ -920,11 +943,12 @@ function DefenseHud({
               <h2>Difendi la Terra</h2>
             </header>
             <ol className="et-guide-list">
-              <li>Trascina per mirare. Parti solo con il cannone e il colpo singolo.</li>
-              <li>I punti si spendono a fine ondata, in una scheda: armi, torrette, missili.</li>
-              <li>Le torrette restano ferme. I cannoni sparano in un cono di ±10°, i missili in ±2°.</li>
-              <li>Ogni ondata chiude con un boss. Se è fuori schermo, una freccia indica dov'è. Dal livello 3 spara anche lui.</li>
-              <li>I bonus cadono dai nemici. Il gelo ferma tutto e, se vuoi, apre lo shop.</li>
+              <li>Trascina per mirare. Parti solo con il cannone e il colpo singolo. Gli upgrade comprati si cambiano in basso, quando vuoi.</li>
+              <li>I punti si spendono a fine ondata. In scheda vedi quanti ne hai, quanto costa e quanti te ne restano.</li>
+              <li>I cannoni fissi sparano a ±10° e non ruotano. I missili restano a ±2°, ma il cono oscilla su ±10°.</li>
+              <li>Il boss sta lontano e scappa. Si lancia sulla Terra solo nell'ultimo quarto di vita. Se impatta, torna con la vita che gli restava, non piena.</li>
+              <li>I bonus non sono colpi: anello grande, scudo, fiocco di neve o croce verde. Il gelo ferma tutto e, se vuoi, apre lo shop.</li>
+              <li>La super della Luna si carica distruggendo nemici. Quando l'anello è pieno, tocca la Luna oppure il pulsante in basso: un'onda pulisce lo schermo.</li>
             </ol>
             <button type="button" className="et-modal-go" onClick={() => buy("guide-ok")}>
               Combatti
@@ -936,8 +960,10 @@ function DefenseHud({
         <div className="et-modal" role="dialog" aria-label={freezeShop ? "Shop del gelo" : "Shop fine ondata"}>
           <div className="et-modal-card">
             <header>
-              <h2>{freezeShop ? "Shop del gelo" : `Fine ondata ${state.wave}`}</h2>
-              <span>{exp} pt</span>
+              <div>
+                <h2>{freezeShop ? "Shop del gelo" : `Fine ondata ${state.wave}`}</h2>
+                <p className="et-wallet">Hai <b>{exp}</b> punti</p>
+              </div>
             </header>
             <div className="et-modal-scroll">
               <section>
@@ -956,7 +982,7 @@ function DefenseHud({
                     <IconTurret />
                     <span>
                       <b>Cannone</b>
-                      <small>{OFFER_COPY["arm-cannon"]} Poi scegli dove metterlo.</small>
+                      <small>{OFFER_COPY["arm-cannon"]} {exp >= (costs?.cannon ?? 40) ? `Costa ${costs?.cannon ?? 40}, restano ${exp - (costs?.cannon ?? 40)}.` : `Costa ${costs?.cannon ?? 40}.`}</small>
                     </span>
                     <em>{costs?.cannon ?? 40}</em>
                   </button>
@@ -969,7 +995,7 @@ function DefenseHud({
                     <IconRocket />
                     <span>
                       <b>Lancia missili</b>
-                      <small>{OFFER_COPY["arm-missile"]} Poi scegli dove metterlo.</small>
+                      <small>{OFFER_COPY["arm-missile"]} {exp >= (costs?.missile ?? 55) ? `Costa ${costs?.missile ?? 55}, restano ${exp - (costs?.missile ?? 55)}.` : `Costa ${costs?.missile ?? 55}.`}</small>
                     </span>
                     <em>{costs?.missile ?? 55}</em>
                   </button>

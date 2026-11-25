@@ -79,7 +79,7 @@ type Shot = {
 type Spark = { mesh: THREE.Mesh; vel: THREE.Vector3; life: number };
 type Shard = { mesh: THREE.Mesh; vel: THREE.Vector3; spin: THREE.Vector3 };
 type DropKind = "shield" | "freeze" | "repair";
-type Drop = { mesh: THREE.Mesh; kind: DropKind };
+type Drop = { mesh: THREE.Object3D; kind: DropKind };
 type Hostile = { mesh: THREE.Mesh; vel: THREE.Vector3; hp: number };
 
 const RIM = 1.1;
@@ -612,7 +612,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
       ghost.add(makeCone(place.kind === "cannon" ? 0x7dfff0 : 0xffb15a, 0.5, place.kind === "cannon" ? CONE_CANNON : CONE_MISSILE));
     }
     ghost.position.set(Math.cos(place.angle) * RIM, Math.sin(place.angle) * RIM, 0.08);
-    ghost.rotation.set(0, 0, place.angle);
+    ghost.rotation.set(0, 0, place.kind === "missile" ? missileFacing(place.angle) : place.angle);
     ghost.visible = true;
   }
 
@@ -625,10 +625,15 @@ export function createDefenseMode(hooks: DefenseHooks) {
     placeTurret(turret);
   }
 
-  function placeTurret(t: { angle: number; mesh: THREE.Group }) {
+  function missileFacing(base: number) {
+    return base + Math.sin(performance.now() * 0.0021) * ((10 * Math.PI) / 180);
+  }
+
+  function placeTurret(t: { angle: number; kind?: "cannon" | "missile"; mesh: THREE.Group }) {
     const show = phase === "play" || phase === "enter";
+    const facing = t.kind === "missile" ? missileFacing(t.angle) : t.angle;
     t.mesh.position.set(Math.cos(t.angle) * RIM, Math.sin(t.angle) * RIM, 0.05);
-    t.mesh.rotation.set(0, 0, t.angle);
+    t.mesh.rotation.set(0, 0, facing);
     t.mesh.visible = show;
   }
 
@@ -851,8 +856,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
       mesh.add(halo, ring);
     }
     hooks.getScene().add(mesh);
-    const travel = Math.max(1.4, dist - 2.2);
-    const speed = Math.max(boss ? 0.72 : 1.15, travel / (boss ? 5.5 : 3.8));
+    const speed = boss ? 0.34 + state.wave * 0.025 : 0.46 + state.wave * 0.04;
     enemies.push({
       mesh,
       speed,
@@ -870,14 +874,37 @@ export function createDefenseMode(hooks: DefenseHooks) {
   }
 
   function spawnDrop(pos: THREE.Vector3, kind: DropKind = "shield") {
-    const color = kind === "shield" ? 0x8ee7ff : kind === "freeze" ? 0xd7f4ff : 0x3ee0a0;
-    const mesh = new THREE.Mesh(
-      new THREE.OctahedronGeometry(0.12, 0),
-      new THREE.MeshBasicMaterial({ color }),
+    const color = kind === "shield" ? 0x7ecbff : kind === "freeze" ? 0xd7f6ff : 0x3ee0a0;
+    const group = new THREE.Group();
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.34, 0.028, 8, 28),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95, depthTest: false }),
     );
-    mesh.position.copy(pos);
-    hooks.getScene().add(mesh);
-    drops.push({ mesh, kind });
+    ring.renderOrder = 6;
+    const glow = new THREE.Mesh(
+      new THREE.RingGeometry(0.18, 0.3, 24),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthTest: false }),
+    );
+    glow.renderOrder = 5;
+    const markMat = new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false });
+    if (kind === "repair") {
+      const h = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.08, 0.04), markMat);
+      const v = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.28, 0.04), markMat);
+      group.add(h, v);
+    } else if (kind === "freeze") {
+      for (let i = 0; i < 3; i += 1) {
+        const arm = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.045, 0.04), markMat);
+        arm.rotation.z = (i * Math.PI) / 3;
+        group.add(arm);
+      }
+    } else {
+      const plate = new THREE.Mesh(new THREE.CircleGeometry(0.16, 6), markMat);
+      group.add(plate);
+    }
+    group.add(ring, glow);
+    group.position.copy(pos);
+    hooks.getScene().add(group);
+    drops.push({ mesh: group, kind });
   }
 
   function rollDrop(boss: boolean) {
@@ -984,25 +1011,26 @@ export function createDefenseMode(hooks: DefenseHooks) {
   }
 
   function fireTurret(t: { angle: number; kind: "cannon" | "missile"; cd: number }) {
+    const facing = t.kind === "missile" ? missileFacing(t.angle) : t.angle;
     const cone = t.kind === "cannon" ? CONE_CANNON : CONE_MISSILE;
-    const aim = coneAim(t.angle, cone);
+    const aim = coneAim(facing, cone);
     if (aim == null) return false;
     if (t.kind === "missile") {
       const kind = state.missile;
       if (kind === "homing") {
-        fireBolt(t.angle, "homing", 5.3, 7.4, 0xffc14d, 22, 3.5, 4);
+        fireBolt(facing, "homing", 5.3, 7.4, 0xffc14d, 22, 3.5, 4);
         t.cd = 3.1;
       } else if (kind === "slow") {
-        fireBolt(t.angle, "slow", 3.7, 1.3, 0xc9b6ff, 14, 2.8, 1);
+        fireBolt(facing, "slow", 3.7, 1.3, 0xc9b6ff, 14, 2.8, 1);
         t.cd = 2.7;
       } else if (kind === "limited") {
-        fireBolt(t.angle, "limited", 4.7, 3.6, 0xff9a6a, 12, 1.7, 1);
+        fireBolt(facing, "limited", 4.7, 3.6, 0xff9a6a, 12, 1.7, 1);
         t.cd = 2.2;
       } else if (kind === "cluster") {
-        fireBolt(t.angle, "cluster", 3.6, 1.6, 0xffd27a, 4.35, 2.3, 1);
+        fireBolt(facing, "cluster", 3.6, 1.6, 0xffd27a, 4.35, 2.3, 1);
         t.cd = 1.9;
       } else {
-        fireBolt(t.angle, "bolt", 5.4, 1.25, 0xffd27a, 16, 2.3);
+        fireBolt(facing, "bolt", 5.4, 1.25, 0xffd27a, 16, 2.3);
         t.cd = 1.15;
       }
       return true;
@@ -1417,10 +1445,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
       const e = enemies[i];
       if (!frozen) {
         if (e.slow > 0) e.slow = Math.max(0, e.slow - dt);
-        const edgeNow = visibleRadius();
-        const distNow = e.mesh.position.length();
-        let pace = e.speed * (e.slow > 0 ? 0.36 : 1);
-        if (distNow > edgeNow * 0.9) pace = Math.max(pace, (distNow - edgeNow * 0.88) / (e.boss ? 2.1 : 1.45));
+        const pace = e.speed * (e.slow > 0 ? 0.36 : 1);
         if (e.boss) {
           const mat = e.mesh.material as THREE.MeshStandardMaterial;
           mat.emissiveIntensity = 0.65 + Math.sin(performance.now() * 0.008) * 0.35;
@@ -1428,20 +1453,18 @@ export function createDefenseMode(hooks: DefenseHooks) {
           if (halo) halo.rotation.z += dt * 2.4;
           const ring = e.mesh.children[1];
           if (ring) ring.rotation.z -= dt * 1.5;
-          e.modeT -= dt;
-          if (e.modeT <= 0) {
-            const roll = Math.random();
-            e.mode = roll < 0.08 ? "blink" : roll < 0.28 ? "strafe" : "in";
-            e.modeT = 1.5 + Math.random() * 1.4;
-            e.strafe = Math.random() < 0.5 ? 1 : -1;
-            if (e.mode === "blink") {
-              const curA = Math.atan2(e.mesh.position.y, e.mesh.position.x);
-              const a = curA + (Math.random() - 0.5) * 0.85;
-              const now = e.mesh.position.length();
-              const r = Math.max(2.5, Math.min(now, visibleRadius() + 0.3));
-              e.mesh.position.set(Math.cos(a) * r, Math.sin(a) * r, 0);
-              burst(e.mesh.position, 0xffb15a, 8);
-            }
+          const pos = e.mesh.position;
+          const dist = Math.max(0.001, pos.length());
+          const diving = e.hp <= e.maxHp * 0.25;
+          const hold = 4.4;
+          if (diving) {
+            pos.addScaledVector(pos.clone().negate().normalize(), Math.min(0.62, pace + 0.18) * dt);
+          } else if (dist < hold) {
+            pos.addScaledVector(pos.clone().normalize(), 0.7 * dt);
+          } else {
+            const tang = new THREE.Vector3(-pos.y, pos.x, 0).normalize();
+            pos.addScaledVector(tang, e.strafe * 0.38 * dt);
+            if (dist > hold + 1.6) pos.addScaledVector(pos.clone().negate().normalize(), 0.22 * dt);
           }
           if (state.wave >= 3) {
             e.shotT -= dt;
@@ -1450,15 +1473,6 @@ export function createDefenseMode(hooks: DefenseHooks) {
               e.shotT = Math.max(0.82, 2.05 - state.wave * 0.05);
               for (let s = 0; s < n; s += 1) spawnHostile(e.mesh.position, e.radius);
             }
-          }
-          if (e.mode === "strafe") {
-            const p = e.mesh.position;
-            const tang = new THREE.Vector3(-p.y, p.x, 0);
-            if (tang.lengthSq() > 1e-6) tang.normalize();
-            e.mesh.position.addScaledVector(tang, e.strafe * pace * 1.55 * dt);
-          } else if (e.mode === "in") {
-            const dir = e.mesh.position.clone().negate().normalize();
-            e.mesh.position.addScaledVector(dir, pace * dt);
           }
         } else {
           const dir = e.mesh.position.clone().negate().normalize();
@@ -1474,16 +1488,21 @@ export function createDefenseMode(hooks: DefenseHooks) {
       }
       if (frozen) continue;
       if (e.mesh.position.length() < 1.02 + e.radius) {
-        const dmg = e.boss ? 14 + state.wave * 2 : 6 + state.wave;
-        const wasBoss = e.boss;
+        const dmg = e.boss ? 12 + state.wave * 2 : 6 + state.wave;
         const pos = e.mesh.position.clone();
+        if (e.boss) {
+          const left = Math.max(1, e.hp);
+          const away = Math.atan2(pos.y, pos.x) + Math.PI;
+          const back = 4.6;
+          e.mesh.position.set(Math.cos(away) * back, Math.sin(away) * back, 0);
+          e.hp = left;
+          burst(pos, 0xff8a1e, 14);
+          hurtEarth(dmg, pos);
+          if (phase !== "play") return;
+          continue;
+        }
         disposeObject(e.mesh);
         enemies.splice(i, 1);
-        if (wasBoss) {
-          bossSpawned = false;
-          trashSpawned = trashQuota;
-          spawnTimer = -1.5;
-        }
         hurtEarth(dmg, pos);
         if (phase !== "play") return;
       }
@@ -1524,7 +1543,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
           continue;
         }
         dir.multiplyScalar(1 / len);
-        d.mesh.position.addScaledVector(dir, 1.55 * dt);
+        d.mesh.position.addScaledVector(dir, 0.72 * dt);
         d.mesh.rotation.z += dt * 2.4;
       }
     }
@@ -1805,27 +1824,32 @@ export function createDefenseMode(hooks: DefenseHooks) {
       clearGhost();
       return true;
     }
+    if (type === "gun-singolo" || type === "gun-raffica" || type === "gun-mitra" || type === "gun-rosa") {
+      const id = type.slice(4) as MainGun;
+      if (state.ownedGuns[id]) {
+        state.mainGun = id;
+        burstLeft = 0;
+        fireCooldown = 0;
+        return true;
+      }
+      if (!state.shop) return false;
+      const cost = id === "singolo" ? 0 : GUN_COST[id];
+      if (state.exp < cost) return false;
+      state.exp -= cost;
+      state.ownedGuns[id] = true;
+      state.mainGun = id;
+      burstLeft = 0;
+      fireCooldown = 0;
+      return true;
+    }
     if (!state.shop) return false;
     if (type === "arm-cannon" || type === "arm-missile") {
       const kind = type === "arm-cannon" ? "cannon" : "missile";
       if (turrets.length >= MAX_TURRETS) return false;
       if (state.exp < turretCost(kind)) return false;
       place = { kind, angle: aimAngle };
-      placeMsg = tooClose(aimAngle) ? "Troppo vicina" : kind === "cannon" ? "Cono ±10°, non ruota" : "Cono ±2°, non ruota";
+      placeMsg = tooClose(aimAngle) ? "Troppo vicina" : kind === "cannon" ? "Cono ±10°, non ruota" : "±2° che oscilla su ±10°";
       syncGhost();
-      return true;
-    }
-    if (type === "gun-singolo" || type === "gun-raffica" || type === "gun-mitra" || type === "gun-rosa") {
-      const id = type.slice(4) as MainGun;
-      if (!state.ownedGuns[id]) {
-        const cost = id === "singolo" ? 0 : GUN_COST[id];
-        if (state.exp < cost) return false;
-        state.exp -= cost;
-        state.ownedGuns[id] = true;
-      }
-      state.mainGun = id;
-      burstLeft = 0;
-      fireCooldown = 0;
       return true;
     }
     if (type === "ammo-singolo" || type === "ammo-doppio" || type === "ammo-bombe") {

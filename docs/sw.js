@@ -1,5 +1,5 @@
-const CACHE = "earthtrip-v15-defense";
-const ASSETS = ["./","./index.html","./app-v15.js","./style.css","./favicon.svg","./manifest.json"];
+const CACHE = "earthtrip-v16-defense";
+const ASSETS = ["./","./index.html","./app-v16.js","./style.css","./favicon.svg","./manifest.json"];
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
 });
