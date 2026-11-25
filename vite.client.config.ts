@@ -5,6 +5,8 @@ import { resolve } from "node:path";
 
 export default defineConfig({
   base: "./",
+  // Gli asset della PWA li copia scripts/build-docs.mjs: così in docs/ non finisce l'anteprima __grok.
+  publicDir: false,
   plugins: [viteReact(), tailwindcss()],
   build: {
     outDir: "docs",

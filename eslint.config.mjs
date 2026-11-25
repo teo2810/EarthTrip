@@ -14,6 +14,8 @@ export default tseslint.config(
       ".vercel/**",
       ".nitro/**",
       "node_modules/**",
+      // copia statica minificata per GitHub Pages
+      "docs/**",
       "src/routeTree.gen.ts",
     ],
   },
