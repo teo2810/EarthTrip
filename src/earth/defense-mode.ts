@@ -324,7 +324,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
   }
 
   function armWave() {
-    trashQuota = 4 + state.wave;
+    trashQuota = 8 + state.wave * 2;
     trashSpawned = 0;
     bossSpawned = false;
     spawnTimer = 0.45;
@@ -908,7 +908,8 @@ export function createDefenseMode(hooks: DefenseHooks) {
   }
 
   function rollDrop(boss: boolean) {
-    if (!boss && Math.random() > 0.18) return null;
+    const chance = boss ? 0.34 : 0.05;
+    if (Math.random() > chance) return null;
     const roll = Math.random();
     if (roll < 0.38) return "shield" as const;
     if (roll < 0.68) return "freeze" as const;
@@ -919,7 +920,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
     const e = enemies[index];
     if (!e) return;
     const wasBoss = e.boss;
-    gain(wasBoss ? 64 + state.wave * 4 : 12 + state.wave, wasBoss ? 18 : 5);
+    gain(wasBoss ? 60 + state.wave * 3 : 6 + state.wave, wasBoss ? 16 : 3);
     burst(e.mesh.position, wasBoss ? 0xffb15a : 0xff6688, wasBoss ? 26 : 10);
     const drop = rollDrop(wasBoss);
     if (drop) spawnDrop(e.mesh.position.clone(), drop);
@@ -1328,12 +1329,20 @@ export function createDefenseMode(hooks: DefenseHooks) {
       }
     };
     grow();
-    for (const e of enemies) burst(e.mesh.position, 0xffe29a, 8);
-    for (const e of enemies) hooks.getScene().remove(e.mesh);
-    enemies.length = 0;
+    for (let i = enemies.length - 1; i >= 0; i -= 1) {
+      const e = enemies[i];
+      if (e.boss) {
+        burst(e.mesh.position, 0x9ecbff, 6);
+        continue;
+      }
+      killEnemy(i);
+    }
+    for (let i = hostiles.length - 1; i >= 0; i -= 1) {
+      burst(hostiles[i].mesh.position, 0xffe29a, 4);
+      disposeObject(hostiles[i].mesh);
+      hostiles.splice(i, 1);
+    }
     state.lunarEnergy = 0;
-    state.exp += 25;
-    state.score += 25;
     arcProgress = -1;
     return true;
   }

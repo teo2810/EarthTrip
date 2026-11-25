@@ -948,7 +948,7 @@ function DefenseHud({
               <li>I cannoni fissi sparano a ±10° e non ruotano. I missili restano a ±2°, ma il cono oscilla su ±10°.</li>
               <li>Il boss sta lontano e scappa. Si lancia sulla Terra solo nell'ultimo quarto di vita. Se impatta, torna con la vita che gli restava, non piena.</li>
               <li>I bonus non sono colpi: anello grande, scudo, fiocco di neve o croce verde. Il gelo ferma tutto e, se vuoi, apre lo shop.</li>
-              <li>La super della Luna si carica distruggendo nemici. Quando l'anello è pieno, tocca la Luna oppure il pulsante in basso: un'onda pulisce lo schermo.</li>
+              <li>La super della Luna si carica distruggendo nemici. A anello pieno, tocca la Luna o il pulsante in basso: spazza nemici e colpi, ma il boss ne è immune.</li>
             </ol>
             <button type="button" className="et-modal-go" onClick={() => buy("guide-ok")}>
               Combatti
