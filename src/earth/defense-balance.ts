@@ -2,43 +2,43 @@
  * Bilanciamento della modalità Difesa: tutti i numeri regolabili stanno qui.
  *
  * Formule
- * - Upgrade a livelli (cannone, torrette, missili): costo = base × 1.35^livello attuale.
+ * - Upgrade a livelli (cannone, torrette, missili): costo = base × 1.22^livello attuale (v20, era 1.35).
  *   Il livello 0 vuol dire "non ancora comprato": il primo acquisto costa la base.
  * - Torrette: costo = base del tipo × 1.25^torrette già piazzate (di qualsiasi tipo).
  * - Testate dei missili: più potenza vuol dire ricarica più lunga.
  */
 export const BALANCE = {
   /** Crescita del costo per ogni livello già comprato. */
-  levelGrowth: 1.35,
+  levelGrowth: 1.22,
   /** Livello massimo di ogni upgrade a livelli. */
-  maxLevel: 10,
+  maxLevel: 12,
 
-  /** Cannone personale: ogni modalità si sblocca a parte e sale da Liv. 1 a 10. */
+  /** Cannone personale: ogni modalità si sblocca a parte e sale da Liv. 1 a maxLevel. Numeri v20 da Math_Calc. */
   gun: {
     /** Perforante: proiettile grosso e lento a ricaricare, passa attraverso 2 nemici. */
-    singolo: { base: 40, damage: 1.6, cooldown: 0.42, pellets: 1, damagePerLevel: 0.18, ratePerLevel: 0.03, speed: 7.2, size: 0.058, color: 0x7dfff0, pierce: 2, range: 18, spreadDeg: 0 },
+    singolo: { base: 55, damage: 1.45, cooldown: 0.42, pellets: 1, damagePerLevel: 0.14, ratePerLevel: 0.03, speed: 7.2, size: 0.058, color: 0x7dfff0, pierce: 2, range: 18, spreadDeg: 0 },
     /** Due colpi paralleli medi. */
-    doppio: { base: 90, damage: 0.8, cooldown: 0.34, pellets: 2, damagePerLevel: 0.13, ratePerLevel: 0.04, speed: 6.6, size: 0.042, color: 0x9dffb0, pierce: 1, range: 18, spreadDeg: 0 },
+    doppio: { base: 85, damage: 0.85, cooldown: 0.32, pellets: 2, damagePerLevel: 0.13, ratePerLevel: 0.04, speed: 6.6, size: 0.042, color: 0x9dffb0, pierce: 1, range: 18, spreadDeg: 0 },
     /** Pioggia di colpi piccoli e veloci, un po' imprecisi. */
-    mitra: { base: 140, damage: 0.28, cooldown: 0.07, pellets: 1, damagePerLevel: 0.05, ratePerLevel: 0.06, speed: 8.2, size: 0.024, color: 0xe6fff8, pierce: 1, range: 18, spreadDeg: 4 },
+    mitra: { base: 115, damage: 0.4, cooldown: 0.07, pellets: 1, damagePerLevel: 0.12, ratePerLevel: 0.06, speed: 8.2, size: 0.024, color: 0xe6fff8, pierce: 1, range: 18, spreadDeg: 3 },
     /** Ventaglio a corto raggio: devastante da vicino. */
-    rosa: { base: 180, damage: 0.55, cooldown: 0.62, pellets: 7, damagePerLevel: 0.12, ratePerLevel: 0.03, speed: 5.6, size: 0.034, color: 0xfff1c2, pierce: 1, range: 7, spreadDeg: 42 },
+    rosa: { base: 150, damage: 0.72, cooldown: 0.58, pellets: 7, damagePerLevel: 0.14, ratePerLevel: 0.03, speed: 5.6, size: 0.034, color: 0xfff1c2, pierce: 1, range: 7, spreadDeg: 32 },
   },
   /** A ogni livello il proiettile del cannone cresce di questa frazione. */
   gunSizePerLevel: 0.05,
 
   /** Torrette automatiche. */
   turrets: {
-    max: 8,
+    max: 10,
     growth: 1.25,
-    cannon: { base: 60, damage: 0.7, cooldown: 0.55, coneDeg: 10 },
-    missile: { base: 90, coneDeg: 2, sweepDeg: 10 },
-    mortar: { base: 110, damage: 2.2, cooldown: 2.3, coneDeg: 20, radius: 1.45, reach: 5.2 },
+    cannon: { base: 60, damage: 0.9, cooldown: 0.55, coneDeg: 14 },
+    missile: { base: 100, coneDeg: 4, sweepDeg: 10 },
+    mortar: { base: 110, damage: 3.0, cooldown: 2.0, coneDeg: 24, radius: 1.45, reach: 5.8 },
   },
 
   /** Upgrade globali, valgono per tutte le torrette. */
   turretUpgrades: {
-    rate: { base: 70, perLevel: 0.07 },
+    rate: { base: 70, perLevel: 0.09 },
     calibre: {
       base: 80,
       perLevel: 0.18,
@@ -56,38 +56,39 @@ export const BALANCE = {
    * La testata Singolo è gratuita, le altre si sbloccano una volta per partita.
    */
   missiles: {
-    singolo: { cost: 0, cooldown: 1.2, damage: 2.2, radius: 0 },
-    rada: { cost: 120, cooldown: 1.9, damage: 0.8, radius: 2.0, slowFor: 3.4 },
-    grappolo: { cost: 180, cooldown: 2.7, damage: 1.4, radius: 0.75, bomblets: 5 },
-    ricerca: { cost: 280, cooldown: 3.5, damage: 6.0, radius: 1.0 },
-    termobarica: { cost: 450, cooldown: 8.0, damage: 12, radius: 3.4 },
+    singolo: { cost: 0, cooldown: 1.35, damage: 2.1, radius: 0 },
+    rada: { cost: 120, cooldown: 1.9, damage: 1.1, radius: 2.0, slowFor: 3.4 },
+    grappolo: { cost: 220, cooldown: 3.0, damage: 0.95, radius: 0.85, bomblets: 5 },
+    /** Il colpo diretto fa damage, l'esplosione (40%) non colpisce di nuovo lo stesso nemico. */
+    ricerca: { cost: 320, cooldown: 3.8, damage: 4.6, radius: 0.85 },
+    termobarica: { cost: 450, cooldown: 6.2, damage: 14, radius: 3.4 },
   },
 
   /**
    * Bonus che cadono dai nemici. chance = probabilità che un nemico lasci un bonus;
-   * weights = come si divide tra i tipi. Prima della v19 il gelo pesava 0,30 (1,5% a nemico, 10% a boss).
+   * weights = come si divide tra i tipi. v20: gelo più frequente; durante il gelo torrette e scudo restano attivi.
    */
   drops: {
-    chanceTrash: 0.05,
-    chanceBoss: 0.34,
-    weights: { shield: 0.45, freeze: 0.1, repair: 0.45 },
+    chanceTrash: 0.07,
+    chanceBoss: 0.45,
+    weights: { shield: 0.38, freeze: 0.25, repair: 0.37 },
   },
 
   /** Nave tesoro: nemico grosso che attraversa lo schermo e spara alla Terra. */
   treasure: {
     /** Probabilità che compaia in un'ondata (dalla wave minWave). */
-    chancePerWave: 0.35,
+    chancePerWave: 0.4,
     minWave: 2,
     radius: 0.27,
-    hp: 3.5,
-    hpPerWave: 0.9,
-    speed: 0.62,
-    shotEvery: 1.8,
+    hp: 4.5,
+    hpPerWave: 1.8,
+    speed: 0.56,
+    shotEvery: 2.3,
     /** Distanza minima e massima dalla Terra della sua rotta. */
     passMin: 1.8,
     passMax: 3.2,
     /** Il bonus vale il prezzo della prossima torretta Cannone base, arrotondato a 5. */
-    pickupLife: 7,
+    pickupLife: 9,
     pickupTapRadius: 0.55,
   },
 
@@ -96,12 +97,19 @@ export const BALANCE = {
     teleportTelegraph: 1.0,
     /** Scarto casuale della destinazione rispetto al lato opposto, in gradi. */
     teleportJitterDeg: 50,
+    /** Raggio del boss: base + perWave × ondata, mai oltre max (la Terra ha raggio 1). */
+    radiusBase: 0.34,
+    radiusPerWave: 0.04,
+    radiusMax: 0.75,
+    /** Dall'ondata fireCapWave in poi i colpi del boss non crescono più (numero e cadenza). */
+    fireCapWave: 10,
+    shotsCap: 4,
   },
 
   /** Upgrade dei missili. */
   missileUpgrades: {
-    reload: { base: 90, perLevel: 0.05 },
-    radius: { base: 90, perLevel: 0.08 },
+    reload: { base: 65, perLevel: 0.09 },
+    radius: { base: 70, perLevel: 0.1 },
   },
 } as const;
 

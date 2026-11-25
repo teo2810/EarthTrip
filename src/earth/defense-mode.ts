@@ -704,7 +704,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
         { key: "gun-pow", title: "Potenziamenti", note: powers.length ? "" : "Sblocca una modalità per potenziarla.", cards: powers },
       ]),
       tab("tower", "Torrette", [
-        { key: "tower-place", title: `Piazza · ${turrets.length}/${BALANCE.turrets.max}`, note: "Ogni torretta in più costa il 25% in più.", cards: towers.slice(0, 3) },
+        { key: "tower-place", title: `Piazza · ${turrets.length}/${BALANCE.turrets.max}`, note: `Ogni torretta in più costa il ${Math.round((BALANCE.turrets.growth - 1) * 100)}% in più.`, cards: towers.slice(0, 3) },
         { key: "tower-pow", title: "Potenziamenti per tutte", note: "", cards: towers.slice(3) },
       ]),
       tab("missile", "Missili", launchers
@@ -1125,12 +1125,23 @@ export function createDefenseMode(hooks: DefenseHooks) {
   /** Distanza a cui il boss gira intorno alla Terra: sempre dentro lo schermo. */
   function bossHold(radius: number) {
     const v = viewHalf();
-    return THREE.MathUtils.clamp(Math.min(v.w, v.h) - radius * 1.9 - 0.25, 2.1, 4.4);
+    // Mai dentro l'orbita della Luna: niente danni gratis dalla collisione lunare.
+    const low = MOON_ORBIT + radius + 0.35;
+    return THREE.MathUtils.clamp(Math.min(v.w, v.h) - radius * 1.9 - 0.25, low, Math.max(4.4, low));
+  }
+
+  /** Zoom minimo con un boss in campo, così la sua orbita (fuori da quella lunare) resta nello schermo. */
+  function bossZoomMin() {
+    const b = enemies.find((e) => e.boss);
+    if (!b) return 0;
+    const need = MOON_ORBIT + b.radius * 2.9 + 0.6;
+    return THREE.MathUtils.clamp(Math.log(need / VIEW_NEAR) / Math.log(VIEW_FAR / VIEW_NEAR), 0, 1);
   }
 
   function spawnEnemy(boss = false, at?: number) {
     const angle = at ?? Math.random() * Math.PI * 2;
-    const radius0 = boss ? 0.34 + state.wave * 0.06 : 0.16;
+    const bb = BALANCE.boss;
+    const radius0 = boss ? Math.min(bb.radiusMax, bb.radiusBase + state.wave * bb.radiusPerWave) : 0.16;
     const dist = edgeDist(angle) + (boss ? radius0 * 2 + 0.35 : 0.45 + Math.random() * 0.35);
     const radius = radius0;
     const hp = boss ? 22 + state.wave * 8 : 1.6 + state.wave * 0.45;
@@ -1475,7 +1486,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
     if (aim == null) return false;
     const cal = turretDamage();
     if (t.kind === "missile") {
-      fireWarhead(facing);
+      fireWarhead(aim.angle);
       t.cd = warheadCooldown(state.missile);
       return true;
     }
@@ -1510,7 +1521,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
     mesh.scale.setScalar(0.055);
     mesh.position.copy(origin).addScaledVector(d, radius + 0.7);
     hooks.getScene().add(mesh);
-    hostiles.push({ mesh, vel: d.multiplyScalar(2.3 + state.wave * 0.07), hp: 1 });
+    hostiles.push({ mesh, vel: d.multiplyScalar(2.3 + Math.min(state.wave, BALANCE.boss.fireCapWave) * 0.07), hp: 1 });
   }
 
   /** Esplosione ad area. skip = nemico già colpito in pieno dallo stesso missile (niente doppio danno). */
@@ -1839,8 +1850,9 @@ export function createDefenseMode(hooks: DefenseHooks) {
       return;
     }
 
-    zoom += (zoomGoal - zoom) * (1 - Math.exp(-dt * 7));
-    if (Math.abs(zoomGoal - zoom) < 1e-4) zoom = zoomGoal;
+    const goal = Math.max(zoomGoal, bossZoomMin());
+    zoom += (goal - zoom) * (1 - Math.exp(-dt * 7));
+    if (Math.abs(goal - zoom) < 1e-4) zoom = goal;
     if (reduceMotion || paused) hitShake = 0;
     cam.position.set((Math.random() - 0.5) * hitShake * 0.22, (Math.random() - 0.5) * hitShake * 0.22, viewZ(cam));
     hitShake = Math.max(0, hitShake - dt * 1.8);
@@ -1939,13 +1951,16 @@ export function createDefenseMode(hooks: DefenseHooks) {
           } else {
             const tang = tmpA.set(-pos.y, pos.x, 0).normalize();
             pos.addScaledVector(tang, e.strafe * 0.38 * dt);
-            if (dist > hold + 1.6) pos.addScaledVector(tmpA.copy(pos).negate().normalize(), 0.22 * dt);
+            // Avvicinamento alla quota d'attesa uguale su lato lungo e lato corto dello schermo.
+            if (dist > hold + 0.4) pos.addScaledVector(tmpA.copy(pos).negate().normalize(), Math.min(dist - hold, Math.max(0.6, pace * 1.6)) * dt);
           }
           if (state.wave >= 3 && e.entering <= 0) {
             e.shotT -= dt;
             if (e.shotT <= 0) {
-              const n = 1 + Math.floor((state.wave - 3) / 2);
-              e.shotT = Math.max(0.82, 2.05 - state.wave * 0.05);
+              const bb = BALANCE.boss;
+              const w = Math.min(state.wave, bb.fireCapWave);
+              const n = Math.min(bb.shotsCap, 1 + Math.floor((w - 3) / 2));
+              e.shotT = Math.max(0.82, 2.05 - w * 0.05);
               for (let s = 0; s < n; s += 1) spawnHostile(e.mesh.position, e.radius);
             }
           }
@@ -2056,15 +2071,20 @@ export function createDefenseMode(hooks: DefenseHooks) {
     fireCooldown -= dt;
     for (const t of turrets) t.cd = Math.max(0, t.cd - dt);
     const threats = enemies.length > 0 || hostiles.length > 0;
-    if (!state.shop && threats && fireCooldown <= 0) {
-      fireMainOnce();
-      fireCooldown = gunStats(state.mainGun).cooldown;
-    }
-    if (!state.shop && !frozen && threats) fireAuto();
+    if (!state.shop && threats) {
+      // Il ritardo si somma invece di essere riassegnato: a 60 fps il Mitra non perde più colpi.
+      const cd = gunStats(state.mainGun).cooldown;
+      for (let n = 0; fireCooldown <= 0 && n < 4; n += 1) {
+        fireMainOnce();
+        fireCooldown += cd;
+      }
+      if (fireCooldown <= 0) fireCooldown = cd;
+    } else if (fireCooldown < 0) fireCooldown = 0;
+    // Gelo: i nemici sono fermi, ma torrette, missili e scudo continuano a lavorare.
+    if (!state.shop && threats) fireAuto();
 
     for (let i = projectiles.length - 1; i >= 0; i -= 1) {
       const p = projectiles[i];
-      if (frozen && p.kind !== "bolt") continue;
       const homing = p.kind === "rada" || p.kind === "ricerca" || p.kind === "termobarica";
       if (homing && enemies.length) {
         let best: Enemy | null = null;
