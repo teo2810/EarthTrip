@@ -135,6 +135,9 @@ const SAVE_KEY = "earthtrip-defense-save";
 const VIEW_NEAR = 3.05;
 const VIEW_FAR = 8.6;
 const BOSS_WARN = 1.6;
+/** Segmenti degli archi di avanzamento (energia lunare, timer delle monete). */
+const ARC_SEGS = 72;
+const COIN_SEGS = 48;
 
 const noMissiles = (): Record<MissileId, boolean> => ({ singolo: true, rada: false, grappolo: false, ricerca: false, termobarica: false });
 const startGuns = (): Record<MainGun, number> => ({ singolo: 1, doppio: 0, mitra: 0, rosa: 0 });
@@ -844,13 +847,42 @@ export function createDefenseMode(hooks: DefenseHooks) {
     hooks.getScene().remove(obj);
     obj.traverse((child) => {
       const mesh = child as THREE.Mesh;
-      if (mesh.geometry) mesh.geometry.dispose();
+      if (mesh.geometry && !mesh.geometry.userData.shared) mesh.geometry.dispose();
       const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
       if (!mat) return;
-      if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
-      else mat.dispose();
+      if (Array.isArray(mat)) mat.forEach((m) => !m.userData.shared && m.dispose());
+      else if (!mat.userData.shared) mat.dispose();
     });
   }
+
+  /*
+   * Geometrie e materiali condivisi per gli oggetti che nascono e muoiono a ogni frame
+   * (scintille, proiettili, colpi ostili, nemici comuni, anelli delle esplosioni).
+   * Sono marcati "shared": disposeObject li salta, così restano in GPU una volta sola.
+   */
+  function share<T extends THREE.BufferGeometry | THREE.Material>(x: T): T {
+    x.userData.shared = true;
+    return x;
+  }
+  const GEO = {
+    spark: share(new THREE.SphereGeometry(0.035, 4, 4)),
+    ball: share(new THREE.SphereGeometry(1, 6, 6)),
+    trash: share(new THREE.OctahedronGeometry(0.16, 0)),
+    blast: share(new THREE.RingGeometry(0.15, 0.28, 28)),
+  };
+  const basicMats = new Map<number, THREE.MeshBasicMaterial>();
+  function basicMat(color: number) {
+    let m = basicMats.get(color);
+    if (!m) {
+      m = share(new THREE.MeshBasicMaterial({ color }));
+      basicMats.set(color, m);
+    }
+    return m;
+  }
+  const trashMat = share(new THREE.MeshStandardMaterial({ color: 0xff4d6d, emissive: 0x5a1020, emissiveIntensity: 0.7, metalness: 0.25, roughness: 0.38 }));
+  /** Vettori di appoggio riusati nel ciclo di gioco, per non allocare a ogni frame. */
+  const tmpA = new THREE.Vector3();
+  const tmpB = new THREE.Vector3();
 
   function clearShield() {
     if (shieldMesh) {
@@ -1040,7 +1072,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
       }),
     );
     moonArc = new THREE.Mesh(
-      new THREE.RingGeometry(0.4, 0.5, 64, 1, Math.PI / 2, 0.02),
+      new THREE.RingGeometry(0.4, 0.52, ARC_SEGS, 1, Math.PI / 2, Math.PI * 2),
       new THREE.MeshBasicMaterial({
         color: 0x9fd0ff,
         transparent: true,
@@ -1065,17 +1097,14 @@ export function createDefenseMode(hooks: DefenseHooks) {
     const q = Math.round(state.lunarEnergy);
     if (q !== arcProgress) {
       arcProgress = q;
-      moonArc.geometry.dispose();
-      moonArc.geometry = new THREE.RingGeometry(0.4, 0.52, 72, 1, Math.PI / 2, Math.max(0.02, (state.lunarEnergy / 100) * Math.PI * 2));
+      // Anello completo creato una volta: si disegna solo la parte carica (6 indici per segmento).
+      moonArc.geometry.setDrawRange(0, Math.max(1, Math.ceil((state.lunarEnergy / 100) * ARC_SEGS)) * 6);
     }
   }
 
   function burst(pos: THREE.Vector3, color: number, count: number) {
     for (let i = 0; i < count; i += 1) {
-      const p = new THREE.Mesh(
-        new THREE.SphereGeometry(0.035, 4, 4),
-        new THREE.MeshBasicMaterial({ color }),
-      );
+      const p = new THREE.Mesh(GEO.spark, basicMat(color));
       p.position.copy(pos);
       hooks.getScene().add(p);
       const vel = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, (Math.random() - 0.5) * 0.25)
@@ -1105,16 +1134,12 @@ export function createDefenseMode(hooks: DefenseHooks) {
     const dist = edgeDist(angle) + (boss ? radius0 * 2 + 0.35 : 0.45 + Math.random() * 0.35);
     const radius = radius0;
     const hp = boss ? 22 + state.wave * 8 : 1.6 + state.wave * 0.45;
-    const mesh = new THREE.Mesh(
-      boss ? new THREE.IcosahedronGeometry(radius, 0) : new THREE.OctahedronGeometry(0.16, 0),
-      new THREE.MeshStandardMaterial({
-        color: boss ? 0xff8a1e : 0xff4d6d,
-        emissive: boss ? 0x7a2c00 : 0x5a1020,
-        emissiveIntensity: boss ? 0.9 : 0.7,
-        metalness: 0.25,
-        roughness: 0.38,
-      }),
-    );
+    const mesh = boss
+      ? new THREE.Mesh(
+          new THREE.IcosahedronGeometry(radius, 0),
+          new THREE.MeshStandardMaterial({ color: 0xff8a1e, emissive: 0x7a2c00, emissiveIntensity: 0.9, metalness: 0.25, roughness: 0.38 }),
+        )
+      : new THREE.Mesh(GEO.trash, trashMat);
     mesh.position.set(Math.cos(angle) * dist, Math.sin(angle) * dist, boss ? 0 : (Math.random() - 0.5) * 0.15);
     if (boss) {
       const halo = new THREE.Mesh(
@@ -1212,7 +1237,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
       new THREE.MeshBasicMaterial({ color: 0xfff1a8, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthTest: false }),
     );
     const arc = new THREE.Mesh(
-      new THREE.RingGeometry(0.3, 0.36, 48, 1, Math.PI / 2, Math.PI * 2),
+      new THREE.RingGeometry(0.3, 0.36, COIN_SEGS, 1, Math.PI / 2, Math.PI * 2),
       new THREE.MeshBasicMaterial({ color: 0xffe27a, transparent: true, opacity: 0.95, side: THREE.DoubleSide, depthTest: false }),
     );
     for (const m of [glow, disc, mark, arc]) m.renderOrder = 10;
@@ -1241,8 +1266,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
       const q = Math.ceil((c.life / life) * 60);
       if (q !== c.q) {
         c.q = q;
-        c.arc.geometry.dispose();
-        c.arc.geometry = new THREE.RingGeometry(0.3, 0.36, 48, 1, Math.PI / 2, Math.max(0.02, (c.life / life) * Math.PI * 2));
+        c.arc.geometry.setDrawRange(0, Math.max(1, Math.ceil((c.life / life) * COIN_SEGS)) * 6);
       }
       const blink = c.life < 2 ? 0.5 + 0.5 * Math.sin(performance.now() * 0.025) : 1;
       c.mesh.scale.setScalar((1 + Math.sin(performance.now() * 0.006) * 0.06) * (0.75 + 0.25 * blink));
@@ -1359,10 +1383,8 @@ export function createDefenseMode(hooks: DefenseHooks) {
 
   function fireBolt(angle: number, kind: ShotKind, speed: number, damage: number, color: number, range: number, life: number, pierce = 1, blast = 0, blastDmg = 0, side = 0, size = 0) {
     const rad = size > 0 ? size : kind === "bolt" ? 0.04 : kind === "bomb" ? 0.075 : kind === "termobarica" ? 0.12 : kind === "ricerca" ? 0.095 : 0.062;
-    const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(rad, 6, 6),
-      new THREE.MeshBasicMaterial({ color }),
-    );
+    const mesh = new THREE.Mesh(GEO.ball, basicMat(color));
+    mesh.scale.setScalar(rad);
     const r0 = RIM + 0.28;
     mesh.position.set(Math.cos(angle) * r0 - Math.sin(angle) * side, Math.sin(angle) * r0 + Math.cos(angle) * side, 0.05);
     hooks.getScene().add(mesh);
@@ -1484,10 +1506,8 @@ export function createDefenseMode(hooks: DefenseHooks) {
     if (dir.lengthSq() < 1e-6) dir.set(0, 1, 0);
     const ang = Math.atan2(dir.y, dir.x) + (Math.random() - 0.5) * 0.38;
     const d = new THREE.Vector3(Math.cos(ang), Math.sin(ang), 0);
-    const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(0.055, 6, 6),
-      new THREE.MeshBasicMaterial({ color: 0xff5a3a }),
-    );
+    const mesh = new THREE.Mesh(GEO.ball, basicMat(0xff5a3a));
+    mesh.scale.setScalar(0.055);
     mesh.position.copy(origin).addScaledVector(d, radius + 0.7);
     hooks.getScene().add(mesh);
     hostiles.push({ mesh, vel: d.multiplyScalar(2.3 + state.wave * 0.07), hp: 1 });
@@ -1497,7 +1517,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
   function areaBlast(pos: THREE.Vector3, radius: number, dmg: number, color: number, skip: Enemy | null = null) {
     burst(pos, color, 14);
     const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.15, 0.28, 28),
+      GEO.blast,
       new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthTest: false }),
     );
     ring.position.copy(pos);
@@ -1510,7 +1530,6 @@ export function createDefenseMode(hooks: DefenseHooks) {
       if (k < 1) requestAnimationFrame(grow);
       else {
         hooks.getScene().remove(ring);
-        ring.geometry.dispose();
         (ring.material as THREE.Material).dispose();
       }
     };
@@ -1891,7 +1910,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
           const hold = bossHold(e.radius);
           if (e.entering > 0) {
             if (onScreen(pos, e.radius)) e.entering = 0;
-            else pos.addScaledVector(pos.clone().negate().normalize(), Math.max(0.9, pace * 2.2) * dt);
+            else pos.addScaledVector(tmpA.copy(pos).negate().normalize(), Math.max(0.9, pace * 2.2) * dt);
           }
           const diving = e.entering <= 0 && e.hp <= e.maxHp * 0.25;
           if (e.tele > 0) {
@@ -1914,13 +1933,13 @@ export function createDefenseMode(hooks: DefenseHooks) {
           } else if (e.entering > 0) {
             /* entra nello schermo prima di tutto il resto */
           } else if (diving) {
-            pos.addScaledVector(pos.clone().negate().normalize(), Math.min(0.62, pace + 0.18) * dt);
+            pos.addScaledVector(tmpA.copy(pos).negate().normalize(), Math.min(0.62, pace + 0.18) * dt);
           } else if (dist < hold) {
-            pos.addScaledVector(pos.clone().normalize(), 0.7 * dt);
+            pos.addScaledVector(tmpA.copy(pos).normalize(), 0.7 * dt);
           } else {
-            const tang = new THREE.Vector3(-pos.y, pos.x, 0).normalize();
+            const tang = tmpA.set(-pos.y, pos.x, 0).normalize();
             pos.addScaledVector(tang, e.strafe * 0.38 * dt);
-            if (dist > hold + 1.6) pos.addScaledVector(pos.clone().negate().normalize(), 0.22 * dt);
+            if (dist > hold + 1.6) pos.addScaledVector(tmpA.copy(pos).negate().normalize(), 0.22 * dt);
           }
           if (state.wave >= 3 && e.entering <= 0) {
             e.shotT -= dt;
@@ -1949,8 +1968,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
             continue;
           }
         } else {
-          const dir = e.mesh.position.clone().negate().normalize();
-          e.mesh.position.addScaledVector(dir, pace * dt);
+          e.mesh.position.addScaledVector(tmpA.copy(e.mesh.position).negate().normalize(), pace * dt);
         }
         e.mesh.rotation.z += dt * (e.boss ? 0.8 : 2.2);
       }
@@ -2010,7 +2028,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
     if (!frozen) {
       for (let i = drops.length - 1; i >= 0; i -= 1) {
         const d = drops[i];
-        const dir = d.mesh.position.clone().negate();
+        const dir = tmpB.copy(d.mesh.position).negate();
         const len = dir.length();
         d.mesh.scale.setScalar(1 + Math.sin(performance.now() * 0.008 + i) * 0.18);
         if (len < 1.35) {
@@ -2059,7 +2077,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
             best = e;
           }
         }
-        const desired = best ? best.mesh.position.clone().sub(p.mesh.position) : new THREE.Vector3();
+        const desired = best ? tmpA.copy(best.mesh.position).sub(p.mesh.position) : tmpA.set(0, 0, 0);
         desired.z = 0;
         if (best && desired.lengthSq() > 1e-6) {
           const speed = p.kind === "ricerca" ? 6.4 : p.kind === "rada" ? 3.8 : 2.7;

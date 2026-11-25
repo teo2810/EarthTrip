@@ -9,6 +9,8 @@ export default defineConfig({
   build: {
     outDir: "docs",
     emptyOutDir: false,
+    // Un solo style.css accanto al bundle, invece del CSS iniettato dentro app.js.
+    cssCodeSplit: false,
     rollupOptions: {
       input: resolve(import.meta.dirname, "src/static-main.tsx"),
       output: {

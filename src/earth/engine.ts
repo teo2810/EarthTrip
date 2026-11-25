@@ -203,6 +203,8 @@ export function mountEarth(
   let orbitStep = 0;
   let frameNo = 0;
   let mapSyncAt = 0;
+  let sunMoonAt = 0;
+  let defenseSynced = false;
   let mapPending = false;
   let view: Telemetry["view"] = "globe";
   let fps = 0;
@@ -251,7 +253,9 @@ export function mountEarth(
   const stars = makeStars(viewport.clientWidth < 800 ? 1100 : 1800);
   scene.add(stars);
 
-  const earthGeo = new THREE.SphereGeometry(1, viewport.clientWidth < 800 ? 64 : 96, 48);
+  /** Schermo piccolo (telefono): sfere con meno segmenti, tanto occupano pochi pixel. */
+  const small = viewport.clientWidth < 800;
+  const earthGeo = new THREE.SphereGeometry(1, small ? 64 : 96, 48);
   const nightUniform = { value: 1 };
   const sunUniform = { value: sunDir.clone() };
   const earthMat = new THREE.ShaderMaterial({
@@ -358,7 +362,7 @@ export function mountEarth(
       }
     `,
   });
-  const clouds = new THREE.Mesh(new THREE.SphereGeometry(1.012, 64, 40), cloudMat);
+  const clouds = new THREE.Mesh(new THREE.SphereGeometry(1.012, small ? 48 : 64, small ? 32 : 40), cloudMat);
   scene.add(clouds);
 
   const atmoMat = new THREE.ShaderMaterial({
@@ -392,7 +396,7 @@ export function mountEarth(
       }
     `,
   });
-  const atmo = new THREE.Mesh(new THREE.SphereGeometry(1.045, 64, 40), atmoMat);
+  const atmo = new THREE.Mesh(new THREE.SphereGeometry(1.045, small ? 48 : 64, small ? 32 : 40), atmoMat);
   scene.add(atmo);
 
   const moonPivot = new THREE.Group();
@@ -431,7 +435,7 @@ export function mountEarth(
       }
     `,
   });
-  const moonMesh = new THREE.Mesh(new THREE.SphereGeometry(MOON_R, 64, 64), moonMat);
+  const moonMesh = new THREE.Mesh(new THREE.SphereGeometry(MOON_R, small ? 40 : 64, small ? 32 : 64), moonMat);
 
   const defense = createDefenseMode({
     getEarth: () => earth,
@@ -765,15 +769,25 @@ export function mountEarth(
       const dt = Math.min(Math.max(rawDt, 0), 0.05);
       const animDt = Math.min(Math.max(rawDt, 0), 0.25);
       const date = simDate();
-      updateSunMoon(date);
-      updateSatPositions(date);
-      if (orbitIdx >= sats.length && performance.now() - orbitAt > 2500) {
-        orbitIdx = 0;
-        orbitStep = 0;
-        orbitAt = performance.now();
+      // In Difesa i satelliti, le orbite, la mappa e le etichette sono nascosti: niente SGP4 e niente DOM a ogni frame.
+      const inDefense = defense.holdsCamera();
+      // Il primo frame in Difesa aggiorna ancora tutto, così satelliti, marker e mappa prendono lo stato nascosto.
+      const lean = inDefense && defenseSynced;
+      defenseSynced = inDefense;
+      if (!lean || nowTick - sunMoonAt > 1000) {
+        sunMoonAt = nowTick;
+        updateSunMoon(date);
       }
-      updateOrbits(date, 16);
-      if (defense.holdsCamera()) {
+      if (!lean) {
+        updateSatPositions(date);
+        if (orbitIdx >= sats.length && performance.now() - orbitAt > 2500) {
+          orbitIdx = 0;
+          orbitStep = 0;
+          orbitAt = performance.now();
+        }
+        updateOrbits(date, 16);
+      }
+      if (inDefense) {
         defense.update(dt);
         controls.enabled = false;
         borders.visible = false;
@@ -795,11 +809,18 @@ export function mountEarth(
         earth.visible = true;
       }
       clouds.rotation.y += dt * 0.00005;
-      updateScales();
       updateAstro();
-      updateSurface();
-      updateLabels();
-      if ((frameNo++ & 1) === 0) updateGeoLabels();
+      if (lean) {
+        if (mapEl.style.opacity !== "0") {
+          mapEl.style.opacity = "0";
+          mapEl.classList.remove("is-hot");
+        }
+      } else {
+        updateScales();
+        updateSurface();
+        updateLabels();
+        if ((frameNo++ & 1) === 0) updateGeoLabels();
+      }
       const dE = camera.position.length() - 1.02;
       const dM = camera.position.distanceTo(moonPivot.position) - MOON_R * 1.02;
       const nr = THREE.MathUtils.clamp(Math.min(dE, dM) * 0.4, 0.0005, 2);
