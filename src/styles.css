@@ -814,24 +814,118 @@
 }
 
 .et-def-toggle.is-on {
+  min-height: 1.7rem;
+  padding: 0 0.55rem;
+  font-size: 0.58rem;
   background: color-mix(in srgb, var(--color-accent) 22%, var(--color-bg));
   color: var(--color-accent);
 }
 
 .et-def-hud {
   position: absolute;
-  left: 0.6rem;
-  right: 0.6rem;
-  bottom: calc(0.55rem + env(safe-area-inset-bottom));
+  left: 0.4rem;
+  right: 0.4rem;
+  bottom: calc(0.35rem + env(safe-area-inset-bottom));
   z-index: 24;
   display: grid;
-  gap: 0.4rem;
-  padding: 0.45rem 0.5rem 0.5rem;
-  border: 1px solid var(--color-line);
-  border-radius: 0.9rem;
-  background: color-mix(in srgb, var(--color-bg) 82%, transparent);
-  backdrop-filter: blur(16px);
+  gap: 0.28rem;
+  padding: 0.28rem 0.35rem 0.32rem;
+  border: 1px solid color-mix(in srgb, var(--color-line) 70%, transparent);
+  border-radius: 0.7rem;
+  background: color-mix(in srgb, var(--color-bg) 72%, transparent);
+  backdrop-filter: blur(12px);
   pointer-events: auto;
+}
+
+.et-def-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 1.85rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.et-def-bar::-webkit-scrollbar { display: none; }
+
+.et-def-w { color: var(--color-fg); }
+.et-def-pt { color: #9dffe8; }
+.et-def-rec { color: #ffd27a; }
+.et-def-last { opacity: 0.7; }
+.et-def-bar .is-shield { color: #9ad7ff; }
+.et-def-bar .is-freeze { color: #d7f4ff; }
+
+.et-def-hud .et-bossbar { width: 100%; height: 0.22rem; }
+
+.et-def-bar .et-lunar {
+  width: 1.85rem;
+  height: 1.85rem;
+  margin-left: auto;
+}
+
+.et-def-bar .et-lunar > svg:last-child {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+.et-shop-row {
+  display: flex;
+  gap: 0.35rem;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  align-items: center;
+  -webkit-overflow-scrolling: touch;
+}
+
+.et-shop-row::-webkit-scrollbar { display: none; }
+
+.et-shop-row > span {
+  flex: 0 0 auto;
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.et-shop-row button {
+  flex: 0 0 auto;
+  min-height: 2.55rem;
+  min-width: 2.55rem;
+  padding: 0 0.72rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-fg);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+  touch-action: manipulation;
+}
+
+.et-shop-row button.is-on {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+}
+
+.et-shop-row button.is-go {
+  position: sticky;
+  right: 0;
+  border-color: #ffb15a;
+  color: #ffe0b8;
+  background: color-mix(in srgb, #141820 88%, #ffb15a);
+}
+
+.et-shop-row button:disabled {
+  opacity: 0.38;
+  cursor: default;
 }
 
 .et-def-stats {
@@ -881,9 +975,96 @@
 
 .et-def-row {
   display: grid;
-  grid-template-columns: 4.4rem 1fr;
-  gap: 0.45rem;
-  align-items: center;
+  grid-template-columns: 3.4rem 1fr;
+  gap: 0.4rem;
+  align-items: start;
+}
+
+.et-def-picks {
+  display: grid;
+  gap: 0.28rem;
+  min-width: 0;
+}
+
+.et-def-pick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.22rem;
+}
+
+.et-def-pick > span {
+  flex: 1 0 100%;
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: 0.55rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.et-def-pick button {
+  flex: 1 1 3.2rem;
+  min-height: 1.85rem;
+  padding: 0.12rem 0.2rem;
+  border: 1px solid var(--color-line);
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--color-fg);
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.02em;
+}
+
+.et-def-pick button.is-on {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+}
+
+.et-def-pick button:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.et-launch {
+  min-height: 2rem;
+  border-radius: 0.55rem;
+  border: 1px solid #ffb15a;
+  background: color-mix(in srgb, #ffb15a 16%, transparent);
+  color: #ffe0b8;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.et-launch:disabled {
+  opacity: 0.45;
+}
+
+.et-def-hint {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.58rem;
+  line-height: 1.35;
+}
+
+.et-bossbar {
+  flex: 1 1 100%;
+  height: 0.32rem;
+  border-radius: 999px;
+  background: #2a1a12;
+  overflow: hidden;
+}
+
+.et-bossbar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #ff5a3a, #ffb15a);
+}
+
+.et-def-row .et-lunar {
+  width: 3.2rem;
+  height: 3.2rem;
 }
 
 .et-lunar {
@@ -1035,14 +1216,14 @@
 .et-zoom {
   position: absolute;
   right: 0.4rem;
-  top: calc(5.6rem + env(safe-area-inset-top));
-  bottom: calc(8.8rem + env(safe-area-inset-bottom));
+  top: calc(6.15rem + env(safe-area-inset-top));
   z-index: 26;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.28rem;
-  width: 2.6rem;
+  gap: 0.16rem;
+  width: 1.55rem;
+  height: 6.4rem;
   pointer-events: auto;
 }
 
@@ -1056,13 +1237,13 @@
 
 .et-zoom-track {
   position: relative;
-  width: 1.7rem;
+  width: 1.15rem;
   flex: 1;
-  min-height: 6.2rem;
+  min-height: 4.2rem;
   border: 1px solid var(--color-line);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--color-bg) 72%, transparent);
-  backdrop-filter: blur(10px);
+  background: color-mix(in srgb, var(--color-bg) 55%, transparent);
+  backdrop-filter: blur(8px);
   touch-action: none;
 }
 
@@ -1081,12 +1262,12 @@
 .et-zoom-track i {
   position: absolute;
   left: 50%;
-  width: 1.05rem;
-  height: 1.05rem;
+  width: 0.72rem;
+  height: 0.72rem;
   border: 2px solid #9dffe8;
   border-radius: 999px;
   background: #102820;
-  box-shadow: 0 0 10px #3ee0a088;
+  box-shadow: 0 0 8px #3ee0a088;
   transform: translate(-50%, -50%);
 }
 

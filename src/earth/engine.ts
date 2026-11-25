@@ -152,6 +152,14 @@ const noopApi: EarthApi = {
   focusSelection() {},
   clearSelection() {},
   dispose() {},
+  enterDefense() {},
+  exitDefense() {},
+  isDefenseActive: () => false,
+  getDefenseState: () => null,
+  buyDefenseUpgrade: () => false,
+  triggerLunarPulse() {},
+  retryDefense() {},
+  setDefenseZoom() {},
 };
 
 export function mountEarth(

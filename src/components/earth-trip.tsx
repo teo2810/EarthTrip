@@ -46,7 +46,13 @@ export function EarthTrip() {
   const [utc, setUtc] = useState("--:--:--");
   const [local, setLocal] = useState("--:--:--");
   const [defenseActive, setDefenseActive] = useState(false);
-  const [gameOver, setGameOver] = useState<{ score: number; wave: number; highscore: number } | null>(null);
+  const [gameOver, setGameOver] = useState<{
+    score: number;
+    wave: number;
+    highscore: number;
+    lastScore?: number | null;
+    lastWave?: number | null;
+  } | null>(null);
   const [defenseState, setDefenseState] = useState({
     wave: 1,
     earthHP: 100,
@@ -66,6 +72,26 @@ export function EarthTrip() {
     shield: 0,
     freezeLeft: 0,
     boss: false,
+    bossHp: 0,
+    bossMax: 0,
+    shop: false,
+    mainGun: "singolo" as "singolo" | "raffica" | "mitra" | "rosa",
+    autoMode: "singolo" as "singolo" | "doppio" | "bombe",
+    missile: "none" as "cluster" | "limited" | "slow" | "homing" | "none",
+    placing: null as "cannon" | "missile" | null,
+    placeMsg: "",
+    cannonTurrets: 0,
+    missileTurrets: 0,
+    costs: { raffica: 70, mitra: 120, rosa: 160, doppio: 90, bombe: 140, cannon: 40, missile: 55, cluster: 80, limited: 130, slow: 170, homing: 260 },
+    guns: [] as { id: string; name: string; owned: boolean; selected: boolean; cost: number }[],
+    ammo: [] as { id: string; name: string; owned: boolean; selected: boolean; cost: number }[],
+    missiles: [] as { id: string; name: string; owned: boolean; selected: boolean; cost: number; open: boolean }[],
+    bestCleared: 0,
+    missileCd: 0,
+    missileCdMax: 2.2,
+    lastRun: null as { score: number; wave: number; at: number } | null,
+    bestRun: null as { score: number; wave: number; at: number } | null,
+    unlocked: { cluster: true, limited: false, slow: false, homing: false },
   });
 
   useEffect(() => {
@@ -152,7 +178,7 @@ export function EarthTrip() {
   const sel = tel.selection;
 
   return (
-    <main className={defenseActive ? "et-root is-defense" : "et-root"}>
+    <main className={["et-root", defenseActive ? "is-defense" : "", defenseState.shop ? "is-shop" : ""].filter(Boolean).join(" ")}>
       <div ref={stageRef} className="et-stage" />
       {!ready && !error ? <div className="et-boot">Sincronizzazione effemeridi</div> : null}
       {error ? (
@@ -211,8 +237,14 @@ export function EarthTrip() {
             <h2>Terra perduta</h2>
             <ul>
               <li>Punteggio <strong>{gameOver.score}</strong></li>
-              <li>Onda <strong>{gameOver.wave}</strong></li>
+              <li>Ondata <strong>{gameOver.wave}</strong></li>
               <li>Record <strong>{gameOver.highscore}</strong></li>
+              {gameOver.lastScore != null ? (
+                <li>
+                  Ultima prima <strong>{gameOver.lastScore}</strong>
+                  {gameOver.lastWave != null ? ` · onda ${gameOver.lastWave}` : ""}
+                </li>
+              ) : null}
             </ul>
             <div className="et-over-actions">
               <button
@@ -405,6 +437,7 @@ export function EarthTrip() {
               step={1}
               value={hours}
               aria-label="Offset temporale in ore"
+              suppressHydrationWarning
               onChange={(e) => setHours(Number(e.target.value))}
             />
           </label>
@@ -700,44 +733,92 @@ function DefenseHud({
     wave: number;
     earthHP: number;
     exp: number;
+    score?: number;
     lunarEnergy: number;
     highscore: number;
-    slots: DefenseSlot[];
-    over?: boolean;
     shield?: number;
     freezeLeft?: number;
     boss?: boolean;
+    bossHp?: number;
+    bossMax?: number;
+    shop?: boolean;
+    placing?: "cannon" | "missile" | null;
+    placeMsg?: string;
+    cannonTurrets?: number;
+    missileTurrets?: number;
+    costs?: {
+      raffica: number;
+      mitra: number;
+      rosa: number;
+      doppio: number;
+      bombe: number;
+      cannon: number;
+      missile: number;
+      cluster: number;
+      limited: number;
+      slow: number;
+      homing: number;
+    };
+    guns?: { id: string; name: string; owned: boolean; selected: boolean; cost: number }[];
+    ammo?: { id: string; name: string; owned: boolean; selected: boolean; cost: number }[];
+    missiles?: { id: string; name: string; owned: boolean; selected: boolean; cost: number; open: boolean }[];
+    lastRun?: { score: number; wave: number } | null;
   };
   api: { current: EarthApi | null };
 }) {
   const frozen = (state.freezeLeft ?? 0) > 0;
   const ready = state.lunarEnergy >= 100 && !frozen;
-  const slots = state.slots.length
-    ? state.slots
-    : [
-        { id: "fire", level: 1, cost: 60, owned: true, selected: true, action: "upgrade" as const, affordable: false, name: "Singolo" },
-        { id: "rose", level: 1, cost: 80, owned: true, selected: false, action: "upgrade" as const, affordable: false, name: "x2" },
-        { id: "pod", level: 0, cost: 110, owned: false, selected: false, action: "buy" as const, affordable: false, name: "Lancio" },
-        { id: "cluster", level: 0, cost: 90, owned: false, selected: false, action: "buy" as const, affordable: false, name: "Grappolo" },
-        { id: "limited", level: 0, cost: 150, owned: false, selected: false, action: "buy" as const, affordable: false, name: "Limite" },
-        { id: "slow", level: 0, cost: 190, owned: false, selected: false, action: "buy" as const, affordable: false, name: "Rada" },
-        { id: "homing", level: 0, cost: 260, owned: false, selected: false, action: "buy" as const, affordable: false, name: "Ricerca" },
-        { id: "shield", level: 0, cost: 80, owned: false, selected: false, action: "buy" as const, affordable: false, name: "Scudo" },
-        { id: "freeze", level: 0, cost: 130, owned: false, selected: false, action: "buy" as const, affordable: false, name: "Gelo" },
-      ];
+  const shop = Boolean(state.shop);
+  const placing = state.placing ?? null;
+  const exp = Math.floor(state.exp);
+  const costs = state.costs;
+  const bossMax = state.bossMax ?? 0;
+  const buy = (id: string) => api.current?.buyDefenseUpgrade(id);
+  const SHORT: Record<string, string> = {
+    "gun-singolo": "1",
+    "gun-raffica": "Raf",
+    "gun-mitra": "Mit",
+    "gun-rosa": "Rosa",
+    "ammo-singolo": "1",
+    "ammo-doppio": "x2",
+    "ammo-bombe": "Bom",
+    "missile-basic": "1",
+    cluster: "Grap",
+    limited: "Lim",
+    slow: "Rada",
+    homing: "Ric",
+  };
+  function chip(item: { id: string; name: string; owned: boolean; selected: boolean; cost: number; open?: boolean }) {
+    const locked = item.open === false && !item.owned;
+    const poor = !item.owned && exp < item.cost;
+    const label = SHORT[item.id] ?? item.name;
+    return (
+      <button
+        key={item.id}
+        type="button"
+        className={item.selected ? "is-on" : ""}
+        disabled={locked || poor}
+        title={locked ? "Si sblocca per ultimo" : item.owned ? item.name : `${item.name} · ${item.cost} pt`}
+        onClick={() => buy(item.id)}
+      >
+        {item.owned ? label : `${label} ${item.cost}`}
+      </button>
+    );
+  }
+  const waveLabel = state.boss ? `B${state.wave}` : shop ? `F${state.wave}` : String(state.wave);
+  const rec = Math.max(state.highscore, Math.floor(state.score ?? 0));
+  const full = (state.cannonTurrets ?? 0) + (state.missileTurrets ?? 0) >= 6;
   return (
-    <div className={frozen ? "et-def-hud is-frozen" : "et-def-hud"}>
-      <div className="et-def-stats">
-        <span>{`Onda ${state.wave}`}</span>
-        <span className="et-def-hp"><i style={{ width: `${Math.max(0, Math.min(100, state.earthHP))}%` }} /></span>
-        <span>HP {Math.round(state.earthHP)}</span>
-        <span>EXP {Math.floor(state.exp)}</span>
-        {state.shield ? <span className="is-shield">Scudo {state.shield}</span> : null}
+    <div className={frozen ? "et-def-hud is-frozen" : shop ? "et-def-hud is-shop" : "et-def-hud"}>
+      <div className="et-def-bar">
+        <span className="et-def-w" title={state.boss ? "Boss" : shop ? "Fine ondata" : "Ondata"}>{waveLabel}</span>
+        <span className="et-def-hp" title="Integrità Terra"><i style={{ width: `${Math.max(0, Math.min(100, state.earthHP))}%` }} /></span>
+        <span>{Math.round(state.earthHP)}</span>
+        <span className="et-def-pt" title="Punti">{exp}</span>
+        {state.shield ? <span className="is-shield">S{state.shield}</span> : null}
         {frozen ? <span className="is-freeze">Gelo</span> : null}
-        {state.boss ? <span className="is-boss">Boss</span> : null}
-        <span>Rec {state.highscore}</span>
-      </div>
-      <div className="et-def-row">
+        <span className="et-def-rec" title="Record">★{rec}</span>
+        {state.lastRun ? <span className="et-def-last" title="Ultima partita">u{state.lastRun.score}</span> : null}
         <button
           type="button"
           className={ready ? "et-lunar is-ready" : "et-lunar"}
@@ -756,44 +837,53 @@ function DefenseHud({
           </svg>
           <IconLunar />
         </button>
-        <div className="et-def-slots">
-          {slots.map((slot) => {
-            const Icon = SLOT_ICON[slot.id] ?? IconSingle;
-            const action = slot.action ?? (slot.owned ? "select" : "buy");
-            const affordable = slot.affordable ?? (slot.cost <= 0 || slot.cost <= state.exp);
-            const poor = !affordable && action !== "max" && action !== "select";
-            const armed = action === "select" && slot.id === "freeze" && !frozen;
-            const cls = [
-              "et-def-slot",
-              slot.selected ? "is-on" : "",
-              action === "max" ? "is-max" : "",
-              (affordable && (action === "buy" || action === "upgrade")) || armed ? "is-buy" : "",
-              poor ? "is-poor" : "",
-            ]
-              .filter(Boolean)
-              .join(" ");
-            return (
-              <button
-                key={slot.id}
-                type="button"
-                className={cls}
-                disabled={frozen || poor || action === "max"}
-                onClick={() => api.current?.buyDefenseUpgrade(slot.id)}
-              >
-                <Icon />
-                <small>{slot.name ?? `Liv. ${slot.level}`}</small>
-                <small>Liv. {slot.level}</small>
-                {action === "max" ? <b>MAX</b> : action === "select" ? <b>{slot.id === "freeze" ? "ATTIVA" : "USA"}</b> : (
-                  <>
-                    <em>{slot.cost}</em>
-                    <b>{action === "upgrade" ? "UPGRADE" : "ACQUISTA"}</b>
-                  </>
-                )}
-              </button>
-            );
-          })}
-        </div>
       </div>
+      {bossMax > 0 ? (
+        <span className="et-bossbar" aria-label="Integrità del boss">
+          <i style={{ width: `${Math.max(0, Math.min(100, ((state.bossHp ?? 0) / bossMax) * 100))}%` }} />
+        </span>
+      ) : null}
+      {shop ? (
+        <div className="et-shop-row" role="group" aria-label="Negozio fine ondata">
+          {placing ? (
+            <>
+              <span>±2°</span>
+              <button type="button" className="is-go" disabled={state.placeMsg === "Troppo vicina"} onClick={() => buy("place-ok")}>
+                Piazza
+              </button>
+              <button type="button" onClick={() => buy("place-no")}>
+                No
+              </button>
+              {state.placeMsg && state.placeMsg !== "±2°" ? <span>{state.placeMsg}</span> : null}
+            </>
+          ) : (
+            <>
+              {(state.guns ?? []).map(chip)}
+              <button
+                type="button"
+                disabled={!costs || exp < costs.cannon || full}
+                title="Torretta cannone, colpo singolo, cono ±2°"
+                onClick={() => buy("arm-cannon")}
+              >
+                Can {costs?.cannon ?? 40}
+              </button>
+              <button
+                type="button"
+                disabled={!costs || exp < costs.missile || full}
+                title="Lancia missili, cono ±2°"
+                onClick={() => buy("arm-missile")}
+              >
+                Mis {costs?.missile ?? 55}
+              </button>
+              {(state.cannonTurrets ?? 0) > 0 ? (state.ammo ?? []).map(chip) : null}
+              {(state.missileTurrets ?? 0) > 0 ? (state.missiles ?? []).map(chip) : null}
+              <button type="button" className="is-go" onClick={() => buy("shop-next")} aria-label="Continua">
+                ▶
+              </button>
+            </>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }
