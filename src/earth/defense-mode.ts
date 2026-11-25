@@ -112,6 +112,12 @@ type Shot = {
   blast: number;
   blastDmg: number;
   color: number;
+  /** Nemici già colpiti da questo proiettile (i perforanti non colpiscono due volte lo stesso). */
+  hits: Set<Enemy> | null;
+  /** Ultimo nemico colpito direttamente: l'esplosione non lo colpisce una seconda volta. */
+  direct: Enemy | null;
+  /** Posizione al frame precedente, per il test di collisione sul segmento percorso. */
+  prev: THREE.Vector3;
 };
 type Spark = { mesh: THREE.Mesh; vel: THREE.Vector3; life: number };
 type Shard = { mesh: THREE.Mesh; vel: THREE.Vector3; spin: THREE.Vector3 };
@@ -189,16 +195,23 @@ function migrateRun(raw: unknown): RunSave | null {
  * e storico in "earthtrip-defense-log"), lo converte senza perdere nulla.
  */
 export function loadSave(): SaveFile {
-  const hs = parseInt(localStorage.getItem("earthtrip-hs") || "0", 10) || 0;
+  const read = (key: string) => {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  };
+  const hs = parseInt(read("earthtrip-hs") || "0", 10) || 0;
   let log: { best?: unknown; last?: unknown; bestCleared?: unknown } | null = null;
   try {
-    log = JSON.parse(localStorage.getItem(HIST_KEY) || "null");
+    log = JSON.parse(read(HIST_KEY) || "null");
   } catch {
     log = null;
   }
   let file: Partial<SaveFile> & { run?: unknown } = {};
   try {
-    file = JSON.parse(localStorage.getItem(SAVE_KEY) || "null") || {};
+    file = JSON.parse(read(SAVE_KEY) || "null") || {};
   } catch {
     file = {};
   }
@@ -210,7 +223,21 @@ export function loadSave(): SaveFile {
   return { v: 2, highscore, best, last, bestCleared, run: migrateRun(file.run) };
 }
 
+/** Distanza al quadrato tra il punto p e il segmento a→b, sul piano di gioco. */
+function segDistSq(a: THREE.Vector3, b: THREE.Vector3, p: THREE.Vector3) {
+  const abx = b.x - a.x;
+  const aby = b.y - a.y;
+  const len = abx * abx + aby * aby;
+  let t = len > 1e-12 ? ((p.x - a.x) * abx + (p.y - a.y) * aby) / len : 0;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  const dx = a.x + abx * t - p.x;
+  const dy = a.y + aby * t - p.y;
+  return dx * dx + dy * dy;
+}
+
 export function createDefenseMode(hooks: DefenseHooks) {
+  const reduceMotion = typeof window !== "undefined" && typeof window.matchMedia === "function"
+    && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const saved = loadSave();
   let savedRun: RunSave | null = saved.run;
   const state: DefenseState = {
@@ -248,6 +275,8 @@ export function createDefenseMode(hooks: DefenseHooks) {
   let place: { kind: TurretKind; angle: number } | null = null;
   let ghost: THREE.Group | null = null;
   let placeMsg = "";
+  /** Descrizione del cono della torretta da piazzare, resta visibile mentre la si trascina. */
+  let placeCone = "";
   const enemies: Enemy[] = [];
   const projectiles: Shot[] = [];
   const particles: Spark[] = [];
@@ -276,7 +305,6 @@ export function createDefenseMode(hooks: DefenseHooks) {
   let trashQuota = 5;
   let trashSpawned = 0;
   let bossSpawned = false;
-  let waveTimer = 0;
   let camT = 1;
   let phase: "idle" | "enter" | "play" | "exit" | "boom" = "idle";
   let moonRing: THREE.Mesh | null = null;
@@ -429,6 +457,10 @@ export function createDefenseMode(hooks: DefenseHooks) {
   }
 
   let previousRun: RunLog | null = null;
+  /** La partita in corso è già stata registrata nello storico (evita il doppio salvataggio). */
+  let runPersisted = false;
+  /** Pausa esplicita (pulsante Pausa o scheda in background). */
+  let paused = false;
 
   function writeLog() {
     const file: SaveFile = {
@@ -502,13 +534,14 @@ export function createDefenseMode(hooks: DefenseHooks) {
   }
 
   function persistRun(force: boolean) {
+    if (runPersisted) return;
+    runPersisted = true;
     const run = { score: Math.floor(state.score), wave: state.wave, at: Date.now() };
     previousRun = state.lastRun;
     if (!force && run.score <= 0 && state.wave <= 1 && state.cleared <= 0) return;
     state.lastRun = run;
     if (!state.bestRun || run.score > state.bestRun.score) state.bestRun = run;
     state.highscore = Math.max(state.highscore, run.score);
-    localStorage.setItem("earthtrip-hs", String(state.highscore));
     if (state.cleared > state.bestCleared) state.bestCleared = state.cleared;
     writeLog();
   }
@@ -706,6 +739,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
       bossShielded: Boolean(bossE && bossE.entering > 0),
       placing: place?.kind ?? null,
       placeMsg,
+      paused,
       bossHint,
       resume: state.guide && savedRun ? { wave: savedRun.wave, exp: Math.floor(savedRun.exp) } : null,
       turrets: turrets.map((t) => ({ kind: t.kind, angle: t.angle })),
@@ -910,7 +944,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
 
   function syncShield() {
     const scene = hooks.getScene();
-    if (state.shield <= 0 || state.freezeLeft > 0) {
+    if (state.shield <= 0) {
       clearShield();
       return;
     }
@@ -1306,7 +1340,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
   }
 
   function hurtEarth(dmg: number, pos: THREE.Vector3) {
-    if (state.shield > 0 && state.freezeLeft <= 0) {
+    if (state.shield > 0) {
       state.shield -= 1;
       hitShake = Math.min(0.45, hitShake + 0.28);
       burst(pos, 0xbfe9ff, 12);
@@ -1346,6 +1380,9 @@ export function createDefenseMode(hooks: DefenseHooks) {
       blast,
       blastDmg,
       color,
+      hits: pierce > 1 ? new Set<Enemy>() : null,
+      direct: null,
+      prev: mesh.position.clone(),
     });
   }
 
@@ -1456,7 +1493,8 @@ export function createDefenseMode(hooks: DefenseHooks) {
     hostiles.push({ mesh, vel: d.multiplyScalar(2.3 + state.wave * 0.07), hp: 1 });
   }
 
-  function areaBlast(pos: THREE.Vector3, radius: number, dmg: number, color: number) {
+  /** Esplosione ad area. skip = nemico già colpito in pieno dallo stesso missile (niente doppio danno). */
+  function areaBlast(pos: THREE.Vector3, radius: number, dmg: number, color: number, skip: Enemy | null = null) {
     burst(pos, color, 14);
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(0.15, 0.28, 28),
@@ -1478,7 +1516,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
     };
     grow();
     for (let j = enemies.length - 1; j >= 0; j -= 1) {
-      if (!targetable(enemies[j])) continue;
+      if (enemies[j] === skip || !targetable(enemies[j])) continue;
       if (enemies[j].mesh.position.distanceTo(pos) > radius + enemies[j].radius) continue;
       enemies[j].hp -= dmg;
       if (enemies[j].hp <= 0) killEnemy(j);
@@ -1518,9 +1556,9 @@ export function createDefenseMode(hooks: DefenseHooks) {
     coins.length = 0;
     clearTeleGhost();
     clearShield();
-    if (cross) hooks.getScene().remove(cross);
-    if (moonRing) hooks.getScene().remove(moonRing);
-    if (moonArc) hooks.getScene().remove(moonArc);
+    if (cross) disposeObject(cross);
+    if (moonRing) disposeObject(moonRing);
+    if (moonArc) disposeObject(moonArc);
     cross = null;
     moonRing = null;
     moonArc = null;
@@ -1556,7 +1594,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
       p.vel.multiplyScalar(0.96);
       p.life -= dt;
       if (p.life <= 0) {
-        hooks.getScene().remove(p.mesh);
+        disposeObject(p.mesh);
         particles.splice(i, 1);
       }
     }
@@ -1567,8 +1605,11 @@ export function createDefenseMode(hooks: DefenseHooks) {
     state.over = true;
     state.earthHP = 0;
     phase = "boom";
+    paused = false;
+    savedRun = null;
+    persistRun(true);
     boomT = 0;
-    flash = 1;
+    flash = reduceMotion ? 0.35 : 1;
     veil = 0;
     for (const e of enemies) disposeObject(e.mesh);
     for (const shot of projectiles) disposeObject(shot.mesh);
@@ -1673,7 +1714,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
   }
 
   function lunarShockwave() {
-    if (state.lunarEnergy < 100 || phase !== "play") return false;
+    if (state.lunarEnergy < 100 || phase !== "play" || paused) return false;
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(0.2, 0.38, 64),
       new THREE.MeshBasicMaterial({
@@ -1695,6 +1736,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
       else {
         hooks.getScene().remove(ring);
         ring.geometry.dispose();
+        (ring.material as THREE.Material).dispose();
       }
     };
     grow();
@@ -1780,6 +1822,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
 
     zoom += (zoomGoal - zoom) * (1 - Math.exp(-dt * 7));
     if (Math.abs(zoomGoal - zoom) < 1e-4) zoom = zoomGoal;
+    if (reduceMotion || paused) hitShake = 0;
     cam.position.set((Math.random() - 0.5) * hitShake * 0.22, (Math.random() - 0.5) * hitShake * 0.22, viewZ(cam));
     hitShake = Math.max(0, hitShake - dt * 1.8);
     cam.up.set(0, 1, 0);
@@ -1794,11 +1837,10 @@ export function createDefenseMode(hooks: DefenseHooks) {
 
     if (state.over) return;
 
-    if (state.guide) return;
+    if (state.guide || paused) return;
 
     if (state.freezeLeft > 0 && !state.shop) {
       state.freezeLeft = Math.max(0, state.freezeLeft - dt);
-      if (state.freezeLeft === 0) syncShield();
     } else if (!state.shop && state.freezeLeft <= 0 && !bossSpawned) {
       const trashAlive = enemies.some((e) => !e.boss && !e.treasure);
       if (treasureAt >= 0 && trashSpawned >= treasureAt) {
@@ -2026,15 +2068,16 @@ export function createDefenseMode(hooks: DefenseHooks) {
           p.vel.lerp(desired, 1 - Math.exp(-dt * turn));
         }
       }
-      const step = p.vel.clone().multiplyScalar(dt);
-      p.mesh.position.add(step);
-      p.traveled += step.length();
+      p.prev.copy(p.mesh.position);
+      p.mesh.position.addScaledVector(p.vel, dt);
+      p.traveled += p.vel.length() * dt;
       p.life -= dt;
-      const ranged = (p.kind === "grappolo" || p.kind === "bomb" || p.kind === "termobarica") && p.traveled >= p.range;
+      const ranged = (p.kind === "grappolo" || p.kind === "bomb" || p.kind === "termobarica" || p.kind === "bolt") && p.traveled >= p.range;
       let spent = p.life <= 0 || ranged;
+      // Collisioni sul segmento percorso in questo frame: i colpi veloci (Mitra) non attraversano più i bersagli.
       if (!spent) {
         for (let h = hostiles.length - 1; h >= 0; h -= 1) {
-          if (p.mesh.position.distanceTo(hostiles[h].mesh.position) > 0.3) continue;
+          if (segDistSq(p.prev, p.mesh.position, hostiles[h].mesh.position) > 0.09) continue;
           hostiles[h].hp -= p.kind === "bolt" || p.kind === "bomb" ? 1 : 2;
           burst(p.mesh.position, 0xffb199, 4);
           if (hostiles[h].hp <= 0) {
@@ -2042,28 +2085,28 @@ export function createDefenseMode(hooks: DefenseHooks) {
             hostiles.splice(h, 1);
             gain(3, 1);
           }
-          if (p.pierce > 1) {
-            p.pierce -= 1;
-            const n = p.vel.clone();
-            if (n.lengthSq() > 1e-8) p.mesh.position.addScaledVector(n.normalize(), 0.45);
-          } else spent = true;
+          if (p.pierce > 1) p.pierce -= 1;
+          else spent = true;
           break;
         }
       }
       if (!spent) {
         for (let j = enemies.length - 1; j >= 0; j -= 1) {
-          if (!targetable(enemies[j])) continue;
-          const reach = enemies[j].radius + (p.kind === "bolt" ? 0.16 : 0.26);
-          if (p.mesh.position.distanceTo(enemies[j].mesh.position) > reach) continue;
-          enemies[j].hp -= p.damage;
+          const e = enemies[j];
+          if (p.hits?.has(e) || !targetable(e)) continue;
+          const reach = e.radius + (p.kind === "bolt" ? 0.16 : 0.26);
+          if (segDistSq(p.prev, p.mesh.position, e.mesh.position) > reach * reach) continue;
+          e.hp -= p.damage;
+          p.direct = p.damage > 0 ? e : null;
           burst(p.mesh.position, p.color, Math.min(14, 3 + Math.round(p.damage * 3)));
-          if (enemies[j].hp <= 0) killEnemy(j);
+          if (e.hp <= 0) killEnemy(j);
           if (p.pierce > 1) {
             p.pierce -= 1;
-            const n = p.vel.clone();
-            if (n.lengthSq() > 1e-8) p.mesh.position.addScaledVector(n.normalize(), 0.5);
-          } else spent = true;
-          break;
+            p.hits?.add(e);
+          } else {
+            spent = true;
+            break;
+          }
         }
       }
       if (!spent) continue;
@@ -2076,7 +2119,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
           areaBlast(pos.clone().add(off), p.blast, p.blastDmg, 0xffe29a);
         }
       } else if (p.kind === "bomb") areaBlast(pos, p.blast, p.blastDmg, 0xff7a3a);
-      else if (p.kind === "ricerca") areaBlast(pos, p.blast, p.blastDmg, 0xffc14d);
+      else if (p.kind === "ricerca") areaBlast(pos, p.blast, p.blastDmg, 0xffc14d, p.direct);
       else if (p.kind === "termobarica") {
         areaBlast(pos, p.blast, p.blastDmg, 0xff5a2a);
         hitShake = Math.min(0.6, hitShake + 0.35);
@@ -2103,7 +2146,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
   }
 
   function onPointer(e: PointerEvent | TouchEvent) {
-    if (phase !== "play" || state.over) return;
+    if (phase !== "play" || state.over || paused) return;
     if (!readPointer(e)) return;
     if (!raycaster.ray.intersectPlane(plane, hit)) return;
     const down = e.type === "pointerdown" || e.type === "touchstart";
@@ -2112,7 +2155,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
     const a = Math.atan2(hit.y, hit.x);
     if (place) {
       place.angle = a;
-      placeMsg = tooClose(a) ? "Troppo vicina" : "";
+      placeMsg = tooClose(a) ? "Troppo vicina" : placeCone;
       syncGhost();
       return;
     }
@@ -2142,6 +2185,8 @@ export function createDefenseMode(hooks: DefenseHooks) {
     freshArcade();
     armWave();
     state.over = false;
+    runPersisted = false;
+    paused = false;
     finale = null;
     pendingFinale = false;
     flash = 0;
@@ -2151,7 +2196,6 @@ export function createDefenseMode(hooks: DefenseHooks) {
     spawnTimer = 0.4;
     fireCooldown = 0.2;
     hitShake = 0;
-    waveTimer = 0;
     aimAngle = Math.PI / 2;
     aimPoint.set(0, 4.2, 0);
     const cam = hooks.getCamera();
@@ -2174,6 +2218,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
   function exit(kind: "user" | "boom" = "user") {
     if (phase === "idle" || phase === "exit") return;
     pendingFinale = kind === "boom";
+    paused = false;
     if (kind === "boom") savedRun = null;
     clearBoom();
     clearActors();
@@ -2189,32 +2234,11 @@ export function createDefenseMode(hooks: DefenseHooks) {
     hooks.restoreSim();
   }
 
-  function retry() {
-    if (phase !== "play") return;
-    for (const e of enemies) hooks.getScene().remove(e.mesh);
-    for (const p of projectiles) hooks.getScene().remove(p.mesh);
-    for (const h of hostiles) hooks.getScene().remove(h.mesh);
-    for (const d of drops) hooks.getScene().remove(d.mesh);
-    for (const c of coins) disposeObject(c.mesh);
-    coins.length = 0;
-    clearTeleGhost();
-    enemies.length = 0;
-    projectiles.length = 0;
-    hostiles.length = 0;
-    drops.length = 0;
-    state.over = false;
-    state.earthHP = 100;
-    state.wave = 1;
-    state.exp = 0;
-    state.score = 0;
-    state.lunarEnergy = 0;
-    freshArcade();
-    dropRun();
-    armWave();
-    spawnTimer = 0.6;
-    waveTimer = 0;
-    arcProgress = -1;
-    syncCannons();
+  /** Mette in pausa il combattimento (pulsante Pausa, scheda in background). */
+  function pause() {
+    if (phase !== "play" || state.over || state.guide || state.shop || paused) return false;
+    paused = true;
+    return true;
   }
 
   /** Paga un upgrade a livelli e restituisce il nuovo livello, o null se non si può. */
@@ -2244,6 +2268,13 @@ export function createDefenseMode(hooks: DefenseHooks) {
       return true;
     }
     if (phase !== "play") return false;
+    if (type === "pause") return pause();
+    if (type === "unpause") {
+      if (!paused) return false;
+      paused = false;
+      return true;
+    }
+    if (paused) return false;
     if (type === "freeze-shop") {
       if (state.guide || state.shop || state.freezeLeft <= 0) return false;
       state.shop = true;
@@ -2342,6 +2373,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
       if (state.exp < turretCost(kind)) return false;
       place = { kind, angle: aimAngle };
       const cone = kind === "cannon" ? `Cono ±${BALANCE.turrets.cannon.coneDeg}°, non ruota` : kind === "missile" ? `±${BALANCE.turrets.missile.coneDeg}° che oscilla su ±${BALANCE.turrets.missile.sweepDeg}°` : `Cono ±${BALANCE.turrets.mortar.coneDeg}°, gittata corta`;
+      placeCone = cone;
       placeMsg = tooClose(aimAngle) ? "Troppo vicina" : cone;
       syncGhost();
       return true;
@@ -2415,7 +2447,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
     setZoom01,
     lunarShockwave,
     buyUpgrade,
-    retry,
+    pause,
     holdsCamera,
     hidesPlanet,
     snapshot,

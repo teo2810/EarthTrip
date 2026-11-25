@@ -79,7 +79,6 @@ export type EarthApi = {
   getDefenseState: () => any;
   buyDefenseUpgrade: (type: string) => boolean;
   triggerLunarPulse: () => void;
-  retryDefense: () => void;
   setDefenseZoom: (t: number) => void;
 };
 
@@ -116,6 +115,5 @@ export type DefenseApi = {
   };
   buyDefenseUpgrade: (type: string) => boolean;
   triggerLunarPulse: () => void;
-  retryDefense: () => void;
   setDefenseZoom: (t: number) => void;
 };

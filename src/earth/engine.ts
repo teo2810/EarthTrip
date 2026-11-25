@@ -158,7 +158,6 @@ const noopApi: EarthApi = {
   getDefenseState: () => null,
   buyDefenseUpgrade: () => false,
   triggerLunarPulse() {},
-  retryDefense() {},
   setDefenseZoom() {},
 };
 
@@ -249,7 +248,8 @@ export function mountEarth(
   scene.add(sunLight);
   const sunSprite = makeSunSprite();
   scene.add(sunSprite);
-  scene.add(makeStars(viewport.clientWidth < 800 ? 1100 : 1800));
+  const stars = makeStars(viewport.clientWidth < 800 ? 1100 : 1800);
+  scene.add(stars);
 
   const earthGeo = new THREE.SphereGeometry(1, viewport.clientWidth < 800 ? 64 : 96, 48);
   const nightUniform = { value: 1 };
@@ -469,7 +469,9 @@ export function mountEarth(
   const onPointerMove = (e: PointerEvent | TouchEvent) => defense.onPointer(e);
   canvas.addEventListener("pointermove", onPointerMove);
   canvas.addEventListener("pointerdown", onPointerMove);
-  canvas.addEventListener("touchmove", onPointerMove, { passive: true });
+  // Ripiego solo per i browser senza Pointer Events: altrimenti ogni movimento del dito farebbe due raycast.
+  const touchFallback = typeof window.PointerEvent === "undefined";
+  if (touchFallback) canvas.addEventListener("touchmove", onPointerMove, { passive: true });
   moonMesh.scale.set(1, 1, 1);
   moonPivot.add(moonMesh);
   const limbPts: THREE.Vector3[] = [];
@@ -707,6 +709,24 @@ export function mountEarth(
   const ro = new ResizeObserver(() => resize());
   ro.observe(viewport);
   resize();
+  // Cambio di densità dei pixel (zoom del browser, schermo diverso): il ResizeObserver non scatta.
+  let dprQuery: MediaQueryList | null = null;
+  const onDprChange = () => {
+    resize();
+    watchDpr();
+  };
+  function watchDpr() {
+    dprQuery?.removeEventListener("change", onDprChange);
+    dprQuery = typeof window.matchMedia === "function" ? window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`) : null;
+    dprQuery?.addEventListener("change", onDprChange, { once: true });
+  }
+  watchDpr();
+  // Scheda in background: la Difesa va in pausa e al rientro il dt riparte da zero.
+  const onVisibility = () => {
+    if (document.hidden) defense.pause();
+    lastTick = performance.now();
+  };
+  document.addEventListener("visibilitychange", onVisibility);
 
   let downX = 0;
   let downY = 0;
@@ -1238,6 +1258,9 @@ export function mountEarth(
         maxZoom: 18,
         worldCopyJump: true,
       });
+      const look = lookAtEarth();
+      const altKm = Math.max((camera.position.length() - 1) * EARTH_KM, 40);
+      map.setView([look.lat, look.lon], THREE.MathUtils.clamp(Math.round(zoomFromAlt(altKm)), 2, 18), { animate: false });
       tileLayer(ESRI, { maxZoom: 19, maxNativeZoom: 19 }).addTo(map);
       window.setTimeout(() => map?.invalidateSize(), 50);
     }, 0);
@@ -1549,7 +1572,9 @@ export function mountEarth(
     canvas.removeEventListener("pointerup", onUp);
     canvas.removeEventListener("pointermove", onPointerMove);
     canvas.removeEventListener("pointerdown", onPointerMove);
-    canvas.removeEventListener("touchmove", onPointerMove);
+    if (touchFallback) canvas.removeEventListener("touchmove", onPointerMove);
+    document.removeEventListener("visibilitychange", onVisibility);
+    dprQuery?.removeEventListener("change", onDprChange);
     controls.dispose();
     map?.remove();
     clearSats();
@@ -1561,8 +1586,11 @@ export function mountEarth(
     atmoMat.dispose();
     moonMesh.geometry.dispose();
     moonMat.dispose();
-    moonMesh.geometry.dispose();
-    moonMat.dispose();
+    stars.geometry.dispose();
+    (stars.material as THREE.Material).dispose();
+    const sunMat = sunSprite.material as THREE.SpriteMaterial;
+    sunMat.map?.dispose();
+    sunMat.dispose();
     moonLimb.geometry.dispose();
     (moonLimb.material as THREE.Material).dispose();
     for (const group of [astroEarth, astroMoon]) {
@@ -1621,7 +1649,6 @@ export function mountEarth(
     getDefenseState: () => defense.snapshot(),
     buyDefenseUpgrade: (type: string) => defense.buyUpgrade(type),
     triggerLunarPulse: () => defense.lunarShockwave(),
-    retryDefense: () => defense.retry(),
     setDefenseZoom: (t: number) => defense.setZoom01(t),
   };
 }
