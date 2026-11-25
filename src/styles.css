@@ -10,8 +10,9 @@
   --color-crew: #f5c56b;
   --color-science: #22d3ee;
   --color-line: #243041;
-  --font-sans: "Barlow", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  /* Font di sistema: Barlow e IBM Plex Mono non venivano mai caricati nella build statica. */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, Consolas, monospace;
   --radius: 0.75rem;
 }
 
@@ -172,16 +173,6 @@
   background: var(--color-fg);
   box-shadow: 0 0 0 1px #07090c;
   transform: translateY(0.05rem);
-}
-
-.et-hud {
-  position: absolute;
-  z-index: 5;
-  pointer-events: none;
-}
-
-.et-hud > * {
-  pointer-events: auto;
 }
 
 .et-top,
@@ -384,15 +375,6 @@
   line-height: 1.45;
 }
 
-.et-section {
-  margin: 0.85rem 0 0.15rem;
-  color: var(--color-muted);
-  font-family: var(--font-mono);
-  font-size: 0.64rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
 .et-card h2,
 .et-sheet h2 {
   margin: 0;
@@ -474,32 +456,6 @@
 
 .et-acc {
   border-top: 1px solid var(--color-line);
-}
-
-.et-acc-btn {
-  width: 100%;
-  min-height: 2.75rem;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 0.1rem;
-  border: 0;
-  background: transparent;
-  color: var(--color-fg);
-  font-size: 0.78rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.et-acc-btn svg {
-  width: 1rem;
-  height: 1rem;
-  color: var(--color-muted);
-  transition: transform 150ms ease;
-}
-
-.et-acc.is-open .et-acc-btn svg {
-  transform: rotate(180deg);
 }
 
 .et-acc-body {
@@ -727,13 +683,6 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .et-sheet,
-  .et-map,
-  .et-switch span:last-child::after {
-    transition: none;
-  }
-}
 
 .et-tabs {
   display: grid;
@@ -871,56 +820,6 @@
 .et-def-bar .et-lunar > svg:last-child {
   width: 0.9rem;
   height: 0.9rem;
-}
-
-.et-shop-row {
-  display: flex;
-  gap: 0.35rem;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  scrollbar-width: none;
-  align-items: center;
-  -webkit-overflow-scrolling: touch;
-}
-
-.et-shop-row::-webkit-scrollbar { display: none; }
-
-.et-shop-row > span {
-  flex: 0 0 auto;
-  color: var(--color-muted);
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.et-shop-row button {
-  flex: 0 0 auto;
-  min-height: 2.55rem;
-  min-width: 2.55rem;
-  padding: 0 0.72rem;
-  border: 1px solid var(--color-line);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--color-fg);
-  font-family: var(--font-mono);
-  font-size: 0.74rem;
-  letter-spacing: 0.02em;
-  touch-action: manipulation;
-}
-
-.et-shop-row button.is-on {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
-}
-
-.et-shop-row button.is-go {
-  position: sticky;
-  right: 0;
-  border-color: #ffb15a;
-  color: #ffe0b8;
-  background: color-mix(in srgb, #141820 88%, #ffb15a);
 }
 
 .et-freeze-shop {
@@ -1165,22 +1064,6 @@
   background: color-mix(in srgb, var(--color-accent) 16%, transparent);
 }
 
-.et-def-stats {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.45rem 0.55rem;
-  color: var(--color-muted);
-  font-family: var(--font-mono);
-  font-size: 0.64rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.et-def-stats .is-shield { color: #9ad7ff; }
-.et-def-stats .is-freeze { color: #d7f4ff; }
-.et-def-stats .is-boss { color: #ffb15a; }
-
 .et-def-hud.is-frozen {
   border-color: #9ad7ff;
 }
@@ -1210,81 +1093,6 @@
   background: linear-gradient(90deg, #ff5d73, #3ee0a0);
 }
 
-.et-def-row {
-  display: grid;
-  grid-template-columns: 3.4rem 1fr;
-  gap: 0.4rem;
-  align-items: start;
-}
-
-.et-def-picks {
-  display: grid;
-  gap: 0.28rem;
-  min-width: 0;
-}
-
-.et-def-pick {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.22rem;
-}
-
-.et-def-pick > span {
-  flex: 1 0 100%;
-  color: var(--color-muted);
-  font-family: var(--font-mono);
-  font-size: 0.55rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.et-def-pick button {
-  flex: 1 1 3.2rem;
-  min-height: 1.85rem;
-  padding: 0.12rem 0.2rem;
-  border: 1px solid var(--color-line);
-  border-radius: 0.5rem;
-  background: transparent;
-  color: var(--color-fg);
-  font-family: var(--font-mono);
-  font-size: 0.58rem;
-  letter-spacing: 0.02em;
-}
-
-.et-def-pick button.is-on {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
-}
-
-.et-def-pick button:disabled {
-  opacity: 0.38;
-  cursor: default;
-}
-
-.et-launch {
-  min-height: 2rem;
-  border-radius: 0.55rem;
-  border: 1px solid #ffb15a;
-  background: color-mix(in srgb, #ffb15a 16%, transparent);
-  color: #ffe0b8;
-  font-family: var(--font-mono);
-  font-size: 0.66rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.et-launch:disabled {
-  opacity: 0.45;
-}
-
-.et-def-hint {
-  margin: 0;
-  color: var(--color-muted);
-  font-size: 0.58rem;
-  line-height: 1.35;
-}
-
 .et-bossbar {
   flex: 1 1 100%;
   height: 0.32rem;
@@ -1297,11 +1105,6 @@
   display: block;
   height: 100%;
   background: linear-gradient(90deg, #ff5a3a, #ffb15a);
-}
-
-.et-def-row .et-lunar {
-  width: 3.2rem;
-  height: 3.2rem;
 }
 
 .et-lunar {
@@ -1355,99 +1158,6 @@
 
 @keyframes et-lunar-pulse {
   50% { filter: drop-shadow(0 0 8px #ffe29a); transform: scale(1.06); }
-}
-
-.et-def-slots {
-  display: flex;
-  gap: 0.28rem;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  scrollbar-width: none;
-  padding-bottom: 0.1rem;
-}
-
-.et-def-slots::-webkit-scrollbar {
-  display: none;
-}
-
-.et-def-slot {
-  flex: 0 0 3.7rem;
-  min-height: 4.35rem;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.05rem;
-  padding: 0.22rem 0.08rem 0.28rem;
-  border: 1px solid var(--color-line);
-  border-radius: 0.65rem;
-  background: transparent;
-  color: var(--color-fg);
-}
-
-.et-def-slot svg {
-  width: 1.15rem;
-  height: 1.15rem;
-}
-
-.et-def-slot small,
-.et-def-slot b,
-.et-def-slot em {
-  font-family: var(--font-mono);
-  font-style: normal;
-  letter-spacing: 0.03em;
-  line-height: 1.15;
-}
-
-.et-def-slot small {
-  font-size: 0.52rem;
-  color: var(--color-muted);
-}
-
-.et-def-slot em {
-  font-size: 0.58rem;
-  color: #9fd0ff;
-}
-
-.et-def-slot b {
-  font-size: 0.48rem;
-  font-weight: 650;
-  letter-spacing: 0.04em;
-}
-
-.et-def-slot.is-on {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-}
-
-.et-def-slot.is-buy {
-  border-color: #3ee0a0;
-  color: #e9fff6;
-  background: color-mix(in srgb, #3ee0a0 18%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, #3ee0a0 55%, transparent), 0 0 14px color-mix(in srgb, #3ee0a0 45%, transparent);
-}
-
-.et-def-slot.is-buy em,
-.et-def-slot.is-buy b,
-.et-def-slot.is-buy small {
-  color: #d9fff1;
-}
-
-.et-def-slot.is-poor {
-  opacity: 0.42;
-  filter: grayscale(0.7);
-}
-
-.et-def-slot.is-poor em {
-  color: #ff6d6d;
-}
-
-.et-def-slot.is-max {
-  opacity: 0.62;
-}
-
-.et-def-slot:disabled {
-  cursor: default;
 }
 
 .et-zoom {
@@ -1598,24 +1308,6 @@
   color: var(--color-accent);
 }
 
-.et-def-retry {
-  margin-left: auto;
-  min-height: 1.6rem;
-  padding: 0 0.55rem;
-  border: 1px solid var(--color-accent);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--color-accent);
-  font-family: var(--font-mono);
-  font-size: 0.62rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .et-lunar.is-ready { animation: none; }
-}
-
 
 /* Shop a livelli (v18) */
 .et-buy { grid-template-columns: 2.1rem 1fr auto; }
@@ -1739,6 +1431,298 @@
 }
 .et-boss-arrow.is-tele { color: #5dff9a; animation: et-boss-warn 0.15s steps(2) infinite alternate; }
 .et-boss-arrow.is-tele i { border-left-color: #5dff9a; filter: drop-shadow(0 0 6px #5dff9a); }
+
+/* ==========================================================================
+   v20 · interfaccia, accessibilità, tap target, safe area (audit 2, 20-24; UI_UX 1-12; QA safe-area)
+   ========================================================================== */
+
+/* Testo solo per lettori di schermo */
+.et-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Focus visibile su tutti i controlli */
+.et-root :focus-visible,
+.et-root button:focus-visible,
+.et-root [role="slider"]:focus-visible,
+.et-root [tabindex]:focus-visible {
+  outline: 2px solid #3ee0a0;
+  outline-offset: 2px;
+}
+
+/* Safe area anche a sinistra e a destra (notch in orizzontale) */
+.et-top {
+  padding-left: calc(0.85rem + env(safe-area-inset-left));
+  padding-right: calc(0.85rem + env(safe-area-inset-right));
+}
+.et-dock,
+.et-card,
+.et-surface-bar {
+  left: calc(0.7rem + env(safe-area-inset-left));
+  right: calc(0.7rem + env(safe-area-inset-right));
+}
+.et-meta {
+  left: calc(0.85rem + env(safe-area-inset-left));
+  right: calc(0.85rem + env(safe-area-inset-right));
+}
+.et-def-hud {
+  left: calc(0.4rem + env(safe-area-inset-left));
+  right: calc(0.4rem + env(safe-area-inset-right));
+}
+.et-zoom { right: calc(0.4rem + env(safe-area-inset-right)); }
+.et-modal {
+  padding-left: calc(0.7rem + env(safe-area-inset-left));
+  padding-right: calc(0.7rem + env(safe-area-inset-right));
+}
+
+/* Testi minimi: 12 px per pulsanti e cornice, 11 px per l'HUD denso */
+.et-brand p,
+.et-clock small,
+.et-meta,
+.et-card p,
+.et-sheet p,
+.et-status { font-size: 0.75rem; }
+.et-btn,
+.et-tab,
+.et-modal-alt,
+.et-gun-switch button,
+.et-place-bar button,
+.et-buy-acts button { font-size: 0.75rem; }
+.et-def-bar { font-size: 0.75rem; }
+.et-zoom span { font-size: 0.6875rem; }
+.et-lvl { font-size: 0.6875rem; }
+
+/* Pulsante Difendi la Terra: più in basso, non tocca la testata; 44 px anche quando è «Esci» */
+.et-def-toggle {
+  top: calc(4.1rem + env(safe-area-inset-top));
+  right: calc(0.85rem + env(safe-area-inset-right));
+  min-height: 2.75rem;
+  font-size: 0.75rem;
+}
+.et-def-toggle.is-on {
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+  padding: 0 0.85rem;
+  font-size: 0.75rem;
+}
+
+/* In Superficie la barra della mappa scende sotto il pulsante Difendi */
+.et-surface-bar { top: calc(7.35rem + env(safe-area-inset-top)); }
+
+/* Dock: niente etichette tagliate su telefono */
+.et-btn { min-height: 3rem; letter-spacing: 0.04em; }
+@media (max-width: 30rem) {
+  .et-dock {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.35rem;
+  }
+  .et-btn {
+    min-height: 2.75rem;
+    flex-direction: row;
+    gap: 0.35rem;
+    font-size: 0.75rem;
+    letter-spacing: 0.02em;
+  }
+  .et-meta { bottom: calc(7.3rem + env(safe-area-inset-bottom)); }
+  .et-card { bottom: calc(9.1rem + env(safe-area-inset-bottom)); }
+}
+
+/* Riga dati in basso compatta su una riga */
+@media (max-width: 40rem) {
+  .et-meta {
+    flex-wrap: nowrap;
+    white-space: nowrap;
+    overflow: hidden;
+    gap: 0.5rem;
+  }
+  .et-meta span { overflow: hidden; text-overflow: ellipsis; }
+  .et-meta span:first-child { flex: none; }
+  /* Gerarchia: TLE e FPS sono secondari */
+  .et-status-tech { display: none; }
+}
+
+/* Intestazione a 360 px: niente ora locale, UTC su una riga */
+.et-clock strong { white-space: nowrap; }
+@media (max-width: 25rem) {
+  .et-clock small { display: none; }
+  .et-clock strong { font-size: 0.8rem; }
+  .et-brand h1 { font-size: 0.95rem; }
+  .et-def-toggle:not(.is-on) span { font-size: 0.75rem; }
+}
+
+/* Etichette del globo leggibili su deserti e ghiacci */
+.et-label.is-state,
+.et-label.is-capital {
+  color: #e7eef6;
+  text-shadow:
+    0 0 4px #07090c,
+    0 1px 2px #07090c,
+    0 0 8px #07090c;
+}
+.et-label.is-state { font-size: 0.75rem; }
+.et-label.is-capital { font-size: 0.75rem; }
+
+/* Tap target da almeno 44 px */
+.et-tab,
+.et-shop-tabs button,
+.et-buy-acts button,
+.et-place-bar button,
+.et-gun-switch button,
+.et-modal-go,
+.et-modal-alt,
+.et-freeze-shop,
+.et-icon-btn,
+.et-text-btn { min-height: 2.75rem; }
+.et-gun-switch button { min-width: 2.75rem; }
+.et-icon-btn { min-width: 2.75rem; }
+.et-def-bar { min-height: 2.75rem; }
+.et-def-bar .et-lunar {
+  position: relative;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex: none;
+}
+.et-def-bar .et-lunar > svg:last-child { width: 1.1rem; height: 1.1rem; }
+
+/* Zoom tattico: binario e cursore più grandi, area di tocco estesa */
+.et-zoom { width: 2.75rem; height: 8rem; top: calc(7.3rem + env(safe-area-inset-top)); }
+.et-zoom-track { width: 1.4rem; min-height: 5rem; }
+.et-zoom-track::after {
+  content: "";
+  position: absolute;
+  inset: -0.4rem -0.7rem;
+}
+.et-zoom-track i { width: 1.375rem; height: 1.375rem; }
+
+/* Pulsante Pausa nell'HUD */
+.et-pause {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-fg);
+}
+.et-pause svg { width: 1.1rem; height: 1.1rem; }
+.et-def-bar .is-shield { display: inline-flex; align-items: center; gap: 0.15rem; }
+.et-def-bar .is-shield svg { width: 0.95rem; height: 0.95rem; }
+.et-pause-card { gap: 0.6rem; }
+
+/* Shop: disabilitato leggibile, «Servono N punti», tab che scorrono */
+.et-buy-acts button:disabled {
+  opacity: 1;
+  border-color: #243041;
+  color: #8ea0b5;
+}
+.et-need {
+  display: block;
+  margin-top: 0.15rem;
+  color: #ff8d7c;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+}
+.et-shop-tabs {
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.et-shop-tabs::-webkit-scrollbar { display: none; }
+
+/* Guida e finestre in orizzontale: la lista scorre, il pulsante resta visibile */
+.et-modal-card {
+  max-height: calc(100dvh - 1.4rem);
+}
+.et-guide-card .et-guide-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.et-guide-list { list-style: decimal; padding-left: 1.5rem; }
+.et-guide-list li::marker { color: #9dffe8; font-family: var(--font-mono); font-weight: 600; }
+.et-guide-list b { color: #9dffe8; font-weight: 600; }
+.et-guide-card .et-modal-go,
+.et-guide-card .et-resume {
+  position: sticky;
+  bottom: 0;
+  flex: none;
+}
+
+/* Tutorial del primo avvio */
+.et-tutorial { z-index: 60; }
+.et-tutorial .et-modal-card { width: min(24rem, 100%); }
+.et-tut-step {
+  margin: 0 0 0.2rem;
+  color: #9dffe8;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.et-tut-body { margin: 0; font-size: 0.95rem; line-height: 1.45; }
+.et-tut-dots {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.et-tut-dots li {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--color-line);
+}
+.et-tut-dots li.is-on { background: var(--color-accent); }
+.et-tut-never {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 2.75rem;
+  font-size: 0.85rem;
+  color: var(--color-muted);
+}
+.et-tut-never input { width: 1.25rem; height: 1.25rem; accent-color: #3ee0a0; }
+.et-tut-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+
+/* Gerarchia: il pulsante Difendi si stacca dal resto */
+.et-root:not(.is-defense) .et-def-toggle {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent), 0 6px 18px #0009;
+}
+
+/* Moto ridotto: un solo blocco per tutto */
 @media (prefers-reduced-motion: reduce) {
-  .et-glitch, .et-glitch p, .et-boss-arrow.is-tele { animation: none; }
+  .et-sheet,
+  .et-map,
+  .et-switch span:last-child::after { transition: none; }
+  .et-lunar.is-ready,
+  .et-glitch,
+  .et-glitch p,
+  .et-boss-arrow.is-tele,
+  .et-boss-arrow.is-warn { animation: none; }
+  .et-root [class^="et-"],
+  .et-root [class*=" et-"] {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+
+/* Controlli + / − di Leaflet sotto la barra Superficie, con area di tocco da 44 px */
+.et-map .leaflet-top.leaflet-left {
+  top: calc(11.9rem + env(safe-area-inset-top));
+  left: env(safe-area-inset-left);
+}
+.et-map .leaflet-control-zoom a {
+  width: 2.75rem;
+  height: 2.75rem;
+  line-height: 2.75rem;
+  font-size: 1.2rem;
 }

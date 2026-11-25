@@ -1089,7 +1089,8 @@ export function mountEarth(
         view = "surface";
         publish(true);
       }
-    } else if (onEarth && surfaceLock && map && map.getZoom() <= 7) {
+    } else if (onEarth && surfaceLock && map && mapPinned && map.getZoom() <= 7) {
+      // Solo dopo che la Superficie ha fissato la mappa (zoom ≥ 8): lo zoom iniziale di ensureMap non conta come uscita.
       const center = map.getCenter();
       const mapAlt = 36000 / 2 ** map.getZoom();
       const radius = 1 + Math.max(mapAlt, 280) / EARTH_KM;
@@ -1227,7 +1228,9 @@ export function mountEarth(
       const ndc = world.project(camera);
       const x = (ndc.x * 0.5 + 0.5) * w;
       const y = (-ndc.y * 0.5 + 0.5) * h;
-      if (ndc.z > 1 || x < 8 || y < 8 || x > w - 8 || y > h - 8) {
+      // Fasce riservate: intestazione in alto, pulsante Difendi a destra, dock e riga dati in basso.
+      const underChrome = y < 64 || y > h - 90 || (x > w - 200 && y < 116);
+      if (ndc.z > 1 || x < 8 || x > w - 8 || underChrome) {
         label.el.style.display = "none";
         continue;
       }
@@ -1235,15 +1238,18 @@ export function mountEarth(
     }
     const centerX = w * 0.5;
     const centerY = h * 0.46;
+    // Le etichette già piazzate (anche di Stati) bloccano le capitali troppo vicine: niente USA sopra Washington.
+    const placed: { x: number; y: number }[] = [];
     const place = (list: { label: GeoLabel; x: number; y: number }[], max: number, gap: number) => {
-      const kept: { x: number; y: number }[] = [];
+      let count = 0;
       for (const item of list) {
-        const crowded = kept.some((p) => Math.hypot(p.x - item.x, p.y - item.y) < gap);
-        if (crowded || kept.length >= max) {
+        const crowded = placed.some((p) => Math.abs(p.x - item.x) < gap * 1.6 && Math.abs(p.y - item.y) < gap * 0.6);
+        if (crowded || count >= max) {
           item.label.el.style.display = "none";
           continue;
         }
-        kept.push(item);
+        count += 1;
+        placed.push(item);
         item.label.el.style.display = "block";
         item.label.el.style.left = `${item.x}px`;
         item.label.el.style.top = `${item.y}px`;

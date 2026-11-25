@@ -610,6 +610,12 @@ export function createDefenseMode(hooks: DefenseHooks) {
     });
     const full = turrets.length >= BALANCE.turrets.max;
     const kinds: TurretKind[] = ["cannon", "missile", "mortar"];
+    const tc = BALANCE.turrets;
+    const towerCopy: Record<TurretKind, string> = {
+      cannon: `Spara in avanti, cono ±${tc.cannon.coneDeg}°, e non ruota.`,
+      missile: `Lunga gittata, cono ±${tc.missile.coneDeg}° che oscilla di ±${tc.missile.sweepDeg}°. Spara la testata scelta nella scheda Missili.`,
+      mortar: `Bomba ad area sui nemici vicini (gittata ${fmt(tc.mortar.reach)}), lenta.`,
+    };
     const towers: ShopCard[] = kinds.map((kind) => {
       const cost = turretCost(kind);
       const n = turrets.filter((t) => t.kind === kind).length;
@@ -617,7 +623,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
         key: `arm-${kind}`,
         name: TURRET_NAME[kind],
         icon: `arm-${kind}`,
-        copy: "",
+        copy: towerCopy[kind],
         stat: n ? `Ne hai ${n}` : "",
         level: null,
         max: 0,
@@ -630,13 +636,13 @@ export function createDefenseMode(hooks: DefenseHooks) {
     towers.push(
       {
         key: "up-rate", name: "Cadenza", icon: "up-rate", copy: "",
-        stat: `Ricarica torrette ×${turretRate().toFixed(2).replace(".", ",")}`,
+        stat: `Ricarica torrette −${Math.round((1 - turretRate()) * 100)}%`,
         level: state.turretRate, max: BALANCE.maxLevel, selected: false, main: null,
         side: upAction("up-rate", tu.rate.base, state.turretRate),
       },
       {
         key: "up-cal", name: "Calibro", icon: "up-cal", copy: "",
-        stat: `${calibreTier().name} · danno torrette ×${turretDamage().toFixed(2).replace(".", ",")}`,
+        stat: `${calibreTier().name} · danno torrette +${Math.round((turretDamage() - 1) * 100)}%`,
         level: state.turretCalibre, max: BALANCE.maxLevel, selected: false, main: null,
         side: upAction("up-cal", tu.calibre.base, state.turretCalibre),
       },

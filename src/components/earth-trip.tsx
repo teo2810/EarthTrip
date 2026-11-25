@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 import { Axis3d, Globe2, Map, Moon, Satellite, SlidersHorizontal, X } from "lucide-react";
 import { DEFAULT_FLAGS, type EarthApi, type Flags, type Telemetry } from "@/earth/types";
+import { BALANCE } from "@/earth/defense-balance";
 
 const EMPTY: Telemetry = {
   altKm: null,
@@ -46,6 +47,8 @@ export function EarthTrip() {
   const [utc, setUtc] = useState("--:--:--");
   const [local, setLocal] = useState("--:--:--");
   const [defenseActive, setDefenseActive] = useState(false);
+  const [tutorial, setTutorial] = useState(false);
+  const overRef = useRef<HTMLDivElement>(null);
   const [gameOver, setGameOver] = useState<{
     score: number;
     wave: number;
@@ -87,7 +90,10 @@ export function EarthTrip() {
 
   useEffect(() => {
     setMounted(true);
+    setTutorial(!tutorialHidden());
   }, []);
+
+  useFocusTrap(overRef, Boolean(gameOver), () => setGameOver(null));
 
   useEffect(() => {
     if (!mounted) return;
@@ -171,9 +177,11 @@ export function EarthTrip() {
             <p className={sim ? "et-status is-sim" : "et-status"}>
               <i />
               {sim ? `Sim ${hours > 0 ? "+" : ""}${hours} h` : "Live"}
-              {" · "}
-              {tel.tle === "live" ? "TLE live" : "TLE di bordo"}
-              {tel.fps > 0 ? ` · ${tel.fps} fps` : ""}
+              <span className="et-status-tech">
+                {" · "}
+                {tel.tle === "live" ? "TLE live" : "TLE di bordo"}
+                {tel.fps > 0 ? ` · ${tel.fps} fps` : ""}
+              </span>
             </p>
           </div>
         </div>
@@ -183,7 +191,11 @@ export function EarthTrip() {
         </div>
       </header>
 
-      <button type="button" className={defenseActive ? "et-def-toggle is-on" : "et-def-toggle"} onClick={() => {
+      <button
+        type="button"
+        className={defenseActive ? "et-def-toggle is-on" : "et-def-toggle"}
+        aria-label={defenseActive ? "Esci da Difendi la Terra" : "Difendi la Terra"}
+        onClick={() => {
           if (defenseActive) {
             apiRef.current?.exitDefense();
             setDefenseActive(false);
@@ -195,20 +207,28 @@ export function EarthTrip() {
           }
         }}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.6"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="currentColor" strokeWidth="1.6"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/></svg>
-        {defenseActive ? "Esci" : "Difendi la Terra"}
+        <span>{defenseActive ? "Esci" : "Difendi la Terra"}</span>
       </button>
       {defenseActive && defenseState.phase !== "boom" && defenseState.phase !== "exit" ? (
         <>
           <ZoomRail value={defenseState.zoom ?? 0.11} onChange={(t) => apiRef.current?.setDefenseZoom(t)} />
-          <DefenseHud state={defenseState} api={apiRef} />
+          <DefenseHud
+            state={defenseState}
+            api={apiRef}
+            onQuit={() => {
+              apiRef.current?.exitDefense();
+              setDefenseActive(false);
+              setGameOver(null);
+            }}
+          />
         </>
       ) : null}
       {defenseActive && (defenseState.freezeLeft ?? 0) > 0 ? <div className="et-def-freeze" /> : null}
       {defenseActive && defenseState.flash > 0.02 ? <div className="et-def-flash" style={{ opacity: defenseState.flash }} /> : null}
       {defenseActive && defenseState.veil > 0.02 ? <div className="et-def-veil" style={{ opacity: defenseState.veil }} /> : null}
       {gameOver ? (
-        <div className="et-over" role="dialog" aria-label="Game over">
-          <div className="et-over-card">
+        <div className="et-over" role="dialog" aria-modal="true" aria-label="Game over">
+          <div className="et-over-card" ref={overRef}>
             <p>Game over</p>
             <h2>Terra perduta</h2>
             <ul>
@@ -240,6 +260,7 @@ export function EarthTrip() {
           </div>
         </div>
       ) : null}
+      {tutorial && ready && !defenseActive && !gameOver ? <Tutorial onClose={() => setTutorial(false)} /> : null}
       {tel.surfaceLock ? (
         <div className="et-surface-bar">
           <p>Superficie · Esri, Maxar, Earthstar Geographics</p>
@@ -262,7 +283,7 @@ export function EarthTrip() {
         </span>
       </p>
 
-      {sel ? (
+      {sel && !tel.surfaceLock ? (
         <article className="et-card">
           <header>
             <div>
@@ -329,7 +350,7 @@ export function EarthTrip() {
         </article>
       ) : null}
 
-      <nav className="et-dock" aria-label="Navigazione missione">
+      <nav className="et-dock" aria-label="Navigazione missione" inert={defenseActive || undefined}>
         <button type="button" className={tel.view === "iss" ? "et-btn is-on" : "et-btn"} aria-pressed={tel.view === "iss"} onClick={() => apiRef.current?.goIss()}>
           <Satellite />
           ISS
@@ -367,7 +388,7 @@ export function EarthTrip() {
 
       </nav>
 
-      <aside className={panel ? "et-sheet is-open" : "et-sheet"} aria-label="Controlli">
+      <aside className={panel ? "et-sheet is-open" : "et-sheet"} aria-label="Controlli" inert={!panel || defenseActive || undefined}>
         <div className="et-grip" />
         <header>
           <h2>Controlli</h2>
@@ -653,16 +674,48 @@ function IconBomb() {
   );
 }
 
+function IconMitra() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 8h9M4 12h13M4 16h9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeDasharray="2 2.2" />
+      <circle cx="19" cy="12" r="1.6" fill="currentColor" />
+    </svg>
+  );
+}
+function IconRate() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="13" r="7" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M12 13V9M12 13l3 2M10 3.5h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+function IconCalibre() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M8 19V10l4-5 4 5v9Z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      <path d="M8 15h8" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  );
+}
+function IconPause() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M8.5 6v12M15.5 6v12" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 const OFFER_ICON: Record<string, () => ReactNode> = {
   "gun-singolo": IconSingle,
   "gun-doppio": IconBurst,
-  "gun-mitra": IconBurst,
+  "gun-mitra": IconMitra,
   "gun-rosa": IconFan,
   "arm-cannon": IconTurret,
   "arm-missile": IconRocket,
   "arm-mortar": IconBomb,
-  "up-rate": IconBurst,
-  "up-cal": IconTurret,
+  "up-rate": IconRate,
+  "up-cal": IconCalibre,
   "wh-singolo": IconRocket,
   "wh-rada": IconFreeze,
   "wh-grappolo": IconCluster,
@@ -677,8 +730,8 @@ const OFFER_COPY: Record<string, string> = {
   "gun-doppio": "Due colpi paralleli sullo stesso mirino.",
   "gun-mitra": "Pioggia di colpi piccoli, un po' imprecisi.",
   "gun-rosa": "Ventaglio a corto raggio, come un colpo a pompa.",
-  "arm-cannon": "Spara in avanti, ±10°, e non ruota.",
-  "arm-missile": "Lunga gittata. Lancia la testata scelta sotto.",
+  "arm-cannon": "Spara in avanti nel suo cono e non ruota.",
+  "arm-missile": "Lunga gittata. Spara la testata scelta nella scheda Missili.",
   "arm-mortar": "Bomba ad area sui nemici vicini, lenta.",
   "up-rate": "Tutte le torrette sparano più spesso.",
   "up-cal": "Tutte le torrette fanno più danno.",
@@ -735,6 +788,8 @@ type HudState = {
   tabs?: ShopTab[];
   bossTele?: { angle: number; left: number } | null;
   lastRun?: { score: number; wave: number } | null;
+  paused?: boolean;
+  turretMax?: number;
 };
 
 function ZoomRail({ value, onChange }: { value: number; onChange: (t: number) => void }) {
@@ -788,6 +843,7 @@ function ShopCardView({ card, exp, buy }: { card: ShopCard; exp: number; buy: (i
   const price = (a: ShopAction) => (a.cost == null ? a.label : `${a.label} · ${a.cost}`);
   const main = card.main;
   const side = card.side;
+  const short = [main, side].find((a) => a && a.disabled && a.cost != null && a.cost > exp);
   return (
     <div className={card.selected ? "et-buy is-on" : "et-buy"}>
       <Icon />
@@ -799,6 +855,7 @@ function ShopCardView({ card, exp, buy }: { card: ShopCard; exp: number; buy: (i
         <small>
           {card.copy || OFFER_COPY[card.key] || ""} {card.stat ? <span className="et-stat">{card.stat}.</span> : null}
         </small>
+        {short && short.cost != null ? <small className="et-need">Servono {short.cost - exp} punti</small> : null}
       </span>
       <span className="et-buy-acts">
         {main ? (
@@ -816,6 +873,10 @@ function ShopCardView({ card, exp, buy }: { card: ShopCard; exp: number; buy: (i
   );
 }
 
+const MAX_LEVEL = BALANCE.maxLevel;
+const TURRET_MAX = BALANCE.turrets.max;
+const LEVEL_PCT = Math.round((BALANCE.levelGrowth - 1) * 100);
+
 /** Punto vicino al bordo dello schermo nella direzione del boss. */
 function edgeSpot(angle: number) {
   const w = window.innerWidth;
@@ -826,7 +887,7 @@ function edgeSpot(angle: number) {
   return { x: w / 2 + c * t, y: h / 2 - s * t };
 }
 
-function DefenseHud({ state, api }: { state: HudState; api: { current: EarthApi | null } }) {
+function DefenseHud({ state, api, onQuit }: { state: HudState; api: { current: EarthApi | null }; onQuit: () => void }) {
   const frozen = (state.freezeLeft ?? 0) > 0;
   const ready = state.lunarEnergy >= 100 && !frozen;
   const shop = Boolean(state.shop);
@@ -835,7 +896,8 @@ function DefenseHud({ state, api }: { state: HudState; api: { current: EarthApi 
   const bossMax = state.bossMax ?? 0;
   const buy = (id: string) => api.current?.buyDefenseUpgrade(id);
   const guide = Boolean(state.guide);
-  const waveLabel = state.boss ? `B${state.wave}` : shop ? `F${state.wave}` : String(state.wave);
+  const waveLabel = state.boss ? `Boss ${state.wave}` : shop ? `Fine ${state.wave}` : `O${state.wave}`;
+  const paused = Boolean(state.paused);
   const rec = Math.max(state.highscore, Math.floor(state.score ?? 0));
   const freezeShop = state.shopKind === "freeze";
   const ownedGuns = state.guns ?? [];
@@ -850,23 +912,54 @@ function DefenseHud({ state, api }: { state: HudState; api: { current: EarthApi 
   const tabs = state.tabs ?? [];
   const [tabKey, setTabKey] = useState("gun");
   const tab = tabs.find((t) => t.key === tabKey) ?? tabs[0];
+  const guideRef = useRef<HTMLDivElement>(null);
+  const shopRef = useRef<HTMLDivElement>(null);
+  const pauseRef = useRef<HTMLDivElement>(null);
+  const shopOpen = shop && !placing && !guide;
+  useFocusTrap(guideRef, guide);
+  useFocusTrap(shopRef, shopOpen, freezeShop ? () => buy("shop-close") : undefined);
+  useFocusTrap(pauseRef, paused, () => buy("unpause"));
+  /** Schede dello shop: frecce sinistra/destra, Home e Fine spostano la scheda attiva (tabindex mobile). */
+  const onTabKey = (e: ReactKeyboardEvent<HTMLButtonElement>) => {
+    const i = tabs.findIndex((t) => t.key === tab?.key);
+    let next = -1;
+    if (e.key === "ArrowRight") next = (i + 1) % tabs.length;
+    else if (e.key === "ArrowLeft") next = (i - 1 + tabs.length) % tabs.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = tabs.length - 1;
+    if (next < 0) return;
+    e.preventDefault();
+    setTabKey(tabs[next].key);
+    const el = document.getElementById(`et-shop-tab-${tabs[next].key}`);
+    el?.focus();
+  };
   return (
     <>
       <div className={frozen ? "et-def-hud is-frozen" : "et-def-hud"}>
         <div className="et-def-bar">
-          <span className="et-def-w" title={state.boss ? "Boss" : shop ? "Fine ondata" : "Ondata"}>{waveLabel}</span>
-          <span className="et-def-hp" title="Integrità Terra"><i style={{ width: `${Math.max(0, Math.min(100, state.earthHP))}%` }} /></span>
-          <span>{Math.round(state.earthHP)}</span>
-          <span className="et-def-pt" title="Punti">{exp}</span>
-          {state.shield ? <span className="is-shield">S{state.shield}</span> : null}
-          {frozen ? <span className="is-freeze">Gelo</span> : null}
+          {!shop && !guide && !placing ? (
+            <button type="button" className="et-pause" aria-label="Pausa" onClick={() => buy("pause")}>
+              <IconPause />
+            </button>
+          ) : null}
+          <span className="et-def-w" aria-label={state.boss ? `Boss, ondata ${state.wave}` : shop ? `Fine ondata ${state.wave}` : `Ondata ${state.wave}`}>{waveLabel}</span>
+          <span className="et-def-hp" aria-hidden="true"><i style={{ width: `${Math.max(0, Math.min(100, state.earthHP))}%` }} /></span>
+          <span aria-label={`Integrità Terra ${Math.round(state.earthHP)} su 100`}>{Math.round(state.earthHP)} HP</span>
+          <span className="et-def-pt" aria-label={`${exp} punti`}>{exp} pt</span>
+          {state.shield ? (
+            <span className="is-shield" aria-label={`Scudo, ${state.shield} colpi`}>
+              <IconShield />
+              {state.shield}
+            </span>
+          ) : null}
+          {frozen ? <span className="is-freeze">Gelo {Math.ceil(state.freezeLeft ?? 0)} s</span> : null}
           {frozen && !shop && !guide ? (
             <button type="button" className="et-freeze-shop" onClick={() => buy("freeze-shop")}>
               Shop
             </button>
           ) : null}
-          <span className="et-def-rec" title="Record">★{rec}</span>
-          {state.lastRun ? <span className="et-def-last" title="Ultima partita">u{state.lastRun.score}</span> : null}
+          <span className="et-def-rec" aria-label={`Record ${rec}`}>Rec {rec}</span>
+          {state.lastRun ? <span className="et-def-last" aria-label={`Ultima partita ${state.lastRun.score}`}>Ult {state.lastRun.score}</span> : null}
           <button
             type="button"
             className={ready ? "et-lunar is-ready" : "et-lunar"}
@@ -932,19 +1025,16 @@ function DefenseHud({ state, api }: { state: HudState; api: { current: EarthApi 
         </div>
       ) : null}
       {guide ? (
-        <div className="et-modal" role="dialog" aria-label="Mini guida">
-          <div className="et-modal-card">
+        <div className="et-modal" role="dialog" aria-modal="true" aria-labelledby="et-guide-title">
+          <div className="et-modal-card et-guide-card" ref={guideRef}>
             <header>
-              <h2>Difendi la Terra</h2>
+              <h2 id="et-guide-title">Difendi la Terra</h2>
             </header>
             <ol className="et-guide-list">
-              <li>Trascina per mirare. Il cannone ha quattro modalità: Singolo, Doppio, Mitra e Rosa. Ognuna si sblocca a parte e sale fino al Liv. 10.</li>
-              <li>I punti si spendono a fine ondata. Ogni livello costa il 35% in più del precedente: scegli cosa potenziare.</li>
-              <li>Fino a 8 torrette: Cannone base, Lancia-missili e Mortaio. Ogni torretta in più costa il 25% in più.</li>
-              <li>Le testate più potenti dei missili ricaricano più lentamente. La Termobarica è la più lenta.</li>
-              <li>Il boss si annuncia con una freccia, entra nello schermo e finché non è entrato non si può colpire. Prima di teletrasportarsi il segnale va in tilt e una freccia verde indica dove ricomparirà.</li>
-              <li>A volte passa una nave tesoro dorata che spara alla Terra. Se la abbatti lascia una moneta: toccala prima che l'anello si svuoti.</li>
-              <li>La super della Luna si carica distruggendo nemici. A anello pieno, tocca la Luna o il pulsante in basso: spazza nemici e colpi, ma il boss ne è immune.</li>
+              <li><b>Mira.</b> Trascina sullo schermo: il cannone spara da solo. Le modalità Singolo, Doppio, Mitra e Rosa si sbloccano a parte e salgono fino al Liv. {MAX_LEVEL}.</li>
+              <li><b>Spendi.</b> A fine ondata compri livelli, fino a {TURRET_MAX} torrette e testate per i missili. Ogni livello costa il {LEVEL_PCT}% in più del precedente.</li>
+              <li><b>Il boss.</b> Una freccia lo annuncia; finché non è entrato nello schermo non si può colpire. La nave tesoro dorata lascia una moneta: toccala prima che l'anello si svuoti.</li>
+              <li><b>Bonus.</b> Scudo, riparazione e Gelo cadono dai nemici: col Gelo i nemici si fermano ma torrette e scudo restano attivi. La super della Luna, a anello pieno, spazza nemici e colpi (non il boss).</li>
             </ol>
             {resume ? (
               <div className="et-resume">
@@ -963,9 +1053,25 @@ function DefenseHud({ state, api }: { state: HudState; api: { current: EarthApi 
           </div>
         </div>
       ) : null}
-      {shop && !placing && !guide ? (
-        <div className="et-modal" role="dialog" aria-label={freezeShop ? "Shop del gelo" : "Shop fine ondata"}>
-          <div className="et-modal-card">
+      {paused ? (
+        <div className="et-modal" role="dialog" aria-modal="true" aria-labelledby="et-pause-title">
+          <div className="et-modal-card et-pause-card" ref={pauseRef}>
+            <header>
+              <h2 id="et-pause-title">Pausa</h2>
+            </header>
+            <p className="et-buy-note">Ondata {state.wave} · {exp} punti · Terra {Math.round(state.earthHP)} HP</p>
+            <button type="button" className="et-modal-go" data-autofocus onClick={() => buy("unpause")}>
+              Riprendi
+            </button>
+            <button type="button" className="et-modal-alt" onClick={onQuit}>
+              Esci dalla partita
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {shopOpen ? (
+        <div className="et-modal" role="dialog" aria-modal="true" aria-label={freezeShop ? "Shop del gelo" : "Shop fine ondata"}>
+          <div className="et-modal-card" ref={shopRef}>
             <header>
               <div>
                 <h2>{freezeShop ? "Shop del gelo" : `Fine ondata ${state.wave}`}</h2>
@@ -976,18 +1082,27 @@ function DefenseHud({ state, api }: { state: HudState; api: { current: EarthApi 
               {tabs.map((t) => (
                 <button
                   key={t.key}
+                  id={`et-shop-tab-${t.key}`}
                   type="button"
                   role="tab"
                   aria-selected={t.key === tab?.key}
+                  aria-controls="et-shop-panel"
+                  tabIndex={t.key === tab?.key ? 0 : -1}
                   className={t.key === tab?.key ? "is-on" : ""}
                   onClick={() => setTabKey(t.key)}
+                  onKeyDown={onTabKey}
                 >
                   {t.title}
-                  {t.ready ? <i className="et-tab-dot" aria-label="qualcosa da comprare" /> : null}
+                  {t.ready ? (
+                    <>
+                      <i className="et-tab-dot" aria-hidden="true" />
+                      <span className="et-sr">, acquistabile</span>
+                    </>
+                  ) : null}
                 </button>
               ))}
             </div>
-            <div className="et-modal-scroll">
+            <div className="et-modal-scroll" id="et-shop-panel" role="tabpanel" aria-labelledby={tab ? `et-shop-tab-${tab.key}` : undefined} tabIndex={0}>
               {(tab?.groups ?? []).map((sec) => (
                 <section key={sec.key}>
                   <p className="et-buy-sec">{sec.title}</p>
@@ -1011,5 +1126,128 @@ function DefenseHud({ state, api }: { state: HudState; api: { current: EarthApi 
         </div>
       ) : null}
     </>
+  );
+}
+
+const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])';
+
+/**
+ * Tiene il focus dentro una finestra modale finché è aperta: Tab e Maiusc+Tab girano tra i suoi controlli,
+ * Esc chiama onEscape. Alla chiusura il focus torna dove era prima.
+ */
+function useFocusTrap(ref: RefObject<HTMLElement | null>, active: boolean, onEscape?: () => void) {
+  const escRef = useRef(onEscape);
+  escRef.current = onEscape;
+  useEffect(() => {
+    if (!active) return;
+    const root = ref.current;
+    if (!root) return;
+    const before = document.activeElement as HTMLElement | null;
+    const items = () => Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el.offsetParent !== null || el === document.activeElement);
+    const first = root.querySelector<HTMLElement>("[data-autofocus]") ?? items()[0];
+    first?.focus({ preventScroll: true });
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && escRef.current) {
+        e.preventDefault();
+        escRef.current();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const list = items();
+      if (!list.length) return;
+      const i = list.indexOf(document.activeElement as HTMLElement);
+      if (e.shiftKey && (i <= 0)) {
+        e.preventDefault();
+        list[list.length - 1].focus();
+      } else if (!e.shiftKey && (i === -1 || i === list.length - 1)) {
+        e.preventDefault();
+        list[0].focus();
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      if (before && document.contains(before)) before.focus({ preventScroll: true });
+    };
+  }, [active, ref]);
+}
+
+const TUTORIAL_KEY = "earthtrip-tutorial";
+
+function tutorialHidden() {
+  try {
+    return localStorage.getItem(TUTORIAL_KEY) === "nascondi";
+  } catch {
+    return false;
+  }
+}
+
+const TUTORIAL_STEPS = [
+  {
+    title: "Ruota il globo",
+    body: "Trascina con un dito o col mouse per girare la Terra. Pizzica o usa la rotella per avvicinarti: sotto i 180 km si apre la mappa della superficie. Tocca un satellite per la sua scheda.",
+  },
+  {
+    title: "Il dock in basso",
+    body: "ISS e Luna ti portano lì in volo, Globale torna alla vista intera, Superficie scende sulla mappa, Astro mostra assi e orbite, Pannello apre livelli, satelliti e ora simulata.",
+  },
+  {
+    title: "Difendi la Terra",
+    body: "Il pulsante in alto a destra avvia il gioco: mira trascinando, compra torrette e missili a fine ondata e resisti ai boss. Puoi mettere in pausa quando vuoi.",
+  },
+] as const;
+
+/** Tutorial di 3 passaggi mostrato al primo avvio; «Non mostrare più» lo salva in localStorage. */
+function Tutorial({ onClose }: { onClose: () => void }) {
+  const [step, setStep] = useState(0);
+  const [never, setNever] = useState(true);
+  const card = useRef<HTMLDivElement>(null);
+  const close = () => {
+    try {
+      if (never) localStorage.setItem(TUTORIAL_KEY, "nascondi");
+      else localStorage.removeItem(TUTORIAL_KEY);
+    } catch {
+      /* memoria bloccata: il tutorial ricomparirà al prossimo avvio */
+    }
+    onClose();
+  };
+  useFocusTrap(card, true, close);
+  const s = TUTORIAL_STEPS[step];
+  const last = step === TUTORIAL_STEPS.length - 1;
+  return (
+    <div className="et-modal et-tutorial" role="dialog" aria-modal="true" aria-labelledby="et-tut-title">
+      <div className="et-modal-card" ref={card} data-step={step + 1}>
+        <header>
+          <div>
+            <p className="et-tut-step">Passo {step + 1} di {TUTORIAL_STEPS.length}</p>
+            <h2 id="et-tut-title">{s.title}</h2>
+          </div>
+        </header>
+        <p className="et-tut-body">{s.body}</p>
+        <ol className="et-tut-dots" aria-hidden="true">
+          {TUTORIAL_STEPS.map((x, i) => (
+            <li key={x.title} className={i === step ? "is-on" : ""} />
+          ))}
+        </ol>
+        <label className="et-tut-never">
+          <input type="checkbox" checked={never} onChange={(e) => setNever(e.target.checked)} />
+          Non mostrare più
+        </label>
+        <div className="et-tut-actions">
+          {step > 0 ? (
+            <button type="button" className="et-modal-alt" onClick={() => setStep((v) => v - 1)}>
+              Indietro
+            </button>
+          ) : (
+            <button type="button" className="et-modal-alt" onClick={close}>
+              Salta
+            </button>
+          )}
+          <button type="button" className="et-modal-go" data-autofocus onClick={() => (last ? close() : setStep((v) => v + 1))}>
+            {last ? "Inizia" : "Avanti"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
