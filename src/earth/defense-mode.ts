@@ -46,6 +46,8 @@ export type DefenseState = {
   bestRun: RunLog | null;
   lastRun: RunLog | null;
   shop: boolean;
+  shopKind: "wave" | "freeze" | null;
+  guide: boolean;
   ownedGuns: Record<MainGun, boolean>;
   ownedAmmo: Record<AutoMode, boolean>;
 };
@@ -88,7 +90,8 @@ const MISSILES: MissileId[] = ["cluster", "limited", "slow", "homing"];
 const MISSILE_COST: Record<MissileId, number> = { cluster: 80, limited: 130, slow: 170, homing: 260 };
 const GUN_COST: Record<Exclude<MainGun, "singolo">, number> = { raffica: 70, mitra: 120, rosa: 160 };
 const AMMO_COST: Record<Exclude<AutoMode, "singolo">, number> = { doppio: 90, bombe: 140 };
-const CONE = (2 * Math.PI) / 180;
+const CONE_CANNON = (10 * Math.PI) / 180;
+const CONE_MISSILE = (2 * Math.PI) / 180;
 const MAX_TURRETS = 6;
 const HIST_KEY = "earthtrip-defense-log";
 
@@ -138,6 +141,8 @@ export function createDefenseMode(hooks: DefenseHooks) {
     bestRun: saved.best,
     lastRun: saved.last,
     shop: false,
+    shopKind: null,
+    guide: true,
     ownedGuns: { singolo: true, raffica: false, mitra: false, rosa: false },
     ownedAmmo: { singolo: true, doppio: false, bombe: false },
   };
@@ -253,6 +258,8 @@ export function createDefenseMode(hooks: DefenseHooks) {
     state.ownedGuns = { singolo: true, raffica: false, mitra: false, rosa: false };
     state.ownedAmmo = { singolo: true, doppio: false, bombe: false };
     state.shop = false;
+    state.shopKind = null;
+    state.guide = true;
     state.shield = 0;
     state.freezeCharges = 0;
     state.freezeLeft = 0;
@@ -421,6 +428,9 @@ export function createDefenseMode(hooks: DefenseHooks) {
     const gunName: Record<MainGun, string> = { singolo: "Singolo", raffica: "Raffica", mitra: "Mitra", rosa: "Rosa" };
     const cannonN = turrets.filter((t) => t.kind === "cannon").length;
     const missileN = turrets.filter((t) => t.kind === "missile").length;
+    const bossHint = bossE && bossE.mesh.position.length() > visibleRadius() * 0.86
+      ? { angle: Math.atan2(bossE.mesh.position.y, bossE.mesh.position.x) }
+      : null;
     return {
       ...state,
       levels: { ...state.levels },
@@ -439,6 +449,9 @@ export function createDefenseMode(hooks: DefenseHooks) {
       missileCdMax,
       placing: place?.kind ?? null,
       placeMsg,
+      shopKind: state.shopKind,
+      guide: state.guide,
+      bossHint,
       turrets: turrets.map((t) => ({ kind: t.kind, angle: t.angle })),
       cannonTurrets: cannonN,
       missileTurrets: missileN,
@@ -560,12 +573,12 @@ export function createDefenseMode(hooks: DefenseHooks) {
       crackGroup = null;
     }
   }
-  function makeCone(color: number, opacity: number) {
+  function makeCone(color: number, opacity: number, half: number) {
     const len = 3.4;
     const shape = new THREE.Shape();
     shape.moveTo(0.22, 0);
-    shape.lineTo(Math.cos(CONE) * len, Math.sin(CONE) * len);
-    shape.lineTo(Math.cos(-CONE) * len, Math.sin(-CONE) * len);
+    shape.lineTo(Math.cos(half) * len, Math.sin(half) * len);
+    shape.lineTo(Math.cos(-half) * len, Math.sin(-half) * len);
     shape.closePath();
     const mesh = new THREE.Mesh(
       new THREE.ShapeGeometry(shape),
@@ -596,7 +609,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
       clearGhost();
       ghost = place.kind === "cannon" ? makeCannon(false) : makeLauncher();
       ghost.userData.kind = place.kind;
-      ghost.add(makeCone(place.kind === "cannon" ? 0x7dfff0 : 0xffb15a, 0.5));
+      ghost.add(makeCone(place.kind === "cannon" ? 0x7dfff0 : 0xffb15a, 0.5, place.kind === "cannon" ? CONE_CANNON : CONE_MISSILE));
     }
     ghost.position.set(Math.cos(place.angle) * RIM, Math.sin(place.angle) * RIM, 0.08);
     ghost.rotation.set(0, 0, place.angle);
@@ -605,7 +618,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
 
   function addTurret(kind: "cannon" | "missile", angle: number) {
     const mesh = kind === "cannon" ? makeCannon(false) : makeLauncher();
-    mesh.add(makeCone(kind === "cannon" ? 0x7dfff0 : 0xffb15a, 0.42));
+    mesh.add(makeCone(kind === "cannon" ? 0x7dfff0 : 0xffb15a, 0.42, kind === "cannon" ? CONE_CANNON : CONE_MISSILE));
     const turret = { angle, kind, cd: 0.35, mesh };
     turrets.push(turret);
     state.pods = turrets.length;
@@ -838,9 +851,11 @@ export function createDefenseMode(hooks: DefenseHooks) {
       mesh.add(halo, ring);
     }
     hooks.getScene().add(mesh);
+    const travel = Math.max(1.4, dist - 2.2);
+    const speed = Math.max(boss ? 0.72 : 1.15, travel / (boss ? 5.5 : 3.8));
     enemies.push({
       mesh,
-      speed: boss ? 0.26 + state.wave * 0.02 : 0.85 + state.wave * 0.11,
+      speed,
       hp,
       maxHp: hp,
       boss,
@@ -890,6 +905,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
       writeLog();
     }
     state.shop = true;
+    state.shopKind = "wave";
     place = null;
     placeMsg = "";
     clearGhost();
@@ -951,13 +967,13 @@ export function createDefenseMode(hooks: DefenseHooks) {
     fireBolt(aimAngle, "bolt", speed, dmg, color, 18, 2.3);
   }
 
-  function coneAim(facing: number) {
+  function coneAim(facing: number, cone: number) {
     let best: number | null = null;
-    let bestAbs = CONE + 1e-6;
+    let bestAbs = cone + 1e-6;
     const consider = (a: number) => {
       const d = angDelta(a, facing);
       const ad = Math.abs(d);
-      if (ad <= CONE && ad < bestAbs) {
+      if (ad <= cone && ad < bestAbs) {
         bestAbs = ad;
         best = facing + d;
       }
@@ -968,7 +984,8 @@ export function createDefenseMode(hooks: DefenseHooks) {
   }
 
   function fireTurret(t: { angle: number; kind: "cannon" | "missile"; cd: number }) {
-    const aim = coneAim(t.angle);
+    const cone = t.kind === "cannon" ? CONE_CANNON : CONE_MISSILE;
+    const aim = coneAim(t.angle, cone);
     if (aim == null) return false;
     if (t.kind === "missile") {
       const kind = state.missile;
@@ -1369,14 +1386,16 @@ export function createDefenseMode(hooks: DefenseHooks) {
 
     if (state.over) return;
 
-    if (state.freezeLeft > 0) {
+    if (state.guide) return;
+
+    if (state.freezeLeft > 0 && !state.shop) {
       state.freezeLeft = Math.max(0, state.freezeLeft - dt);
       if (state.freezeLeft === 0) syncShield();
-    } else if (!state.shop && !bossSpawned) {
+    } else if (!state.shop && state.freezeLeft <= 0 && !bossSpawned) {
       const trashAlive = enemies.some((e) => !e.boss);
       spawnTimer += dt;
       if (trashSpawned < trashQuota) {
-        const every = Math.max(0.36, 1.28 - state.wave * 0.055);
+        const every = Math.max(0.28, 0.78 - state.wave * 0.04);
         if (spawnTimer > every) {
           spawnTimer = 0;
           spawnEnemy(false);
@@ -1386,7 +1405,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
             trashSpawned += 1;
           }
         }
-      } else if (!trashAlive && spawnTimer > 0.7) {
+      } else if (!trashAlive && spawnTimer > 0.35) {
         spawnEnemy(true);
         bossSpawned = true;
       }
@@ -1398,7 +1417,10 @@ export function createDefenseMode(hooks: DefenseHooks) {
       const e = enemies[i];
       if (!frozen) {
         if (e.slow > 0) e.slow = Math.max(0, e.slow - dt);
-        const pace = e.speed * (e.slow > 0 ? 0.36 : 1);
+        const edgeNow = visibleRadius();
+        const distNow = e.mesh.position.length();
+        let pace = e.speed * (e.slow > 0 ? 0.36 : 1);
+        if (distNow > edgeNow * 0.9) pace = Math.max(pace, (distNow - edgeNow * 0.88) / (e.boss ? 2.1 : 1.45));
         if (e.boss) {
           const mat = e.mesh.material as THREE.MeshStandardMaterial;
           mat.emissiveIntensity = 0.65 + Math.sin(performance.now() * 0.008) * 0.35;
@@ -1409,7 +1431,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
           e.modeT -= dt;
           if (e.modeT <= 0) {
             const roll = Math.random();
-            e.mode = roll < 0.16 ? "blink" : roll < 0.52 ? "strafe" : "in";
+            e.mode = roll < 0.08 ? "blink" : roll < 0.28 ? "strafe" : "in";
             e.modeT = 1.5 + Math.random() * 1.4;
             e.strafe = Math.random() < 0.5 ? 1 : -1;
             if (e.mode === "blink") {
@@ -1727,10 +1749,31 @@ export function createDefenseMode(hooks: DefenseHooks) {
   }
 
   function buyUpgrade(type: string) {
-    if (phase !== "play" || state.over) return false;
-    if (type === "shop-next") {
-      if (!state.shop || place) return false;
+    if (phase === "idle" || phase === "exit" || phase === "boom" || state.over) return false;
+    if (type === "guide-ok") {
+      state.guide = false;
+      return true;
+    }
+    if (phase !== "play") return false;
+    if (type === "freeze-shop") {
+      if (state.guide || state.shop || state.freezeLeft <= 0) return false;
+      state.shop = true;
+      state.shopKind = "freeze";
+      return true;
+    }
+    if (type === "shop-close") {
+      if (!state.shop || state.shopKind !== "freeze") return false;
       state.shop = false;
+      state.shopKind = null;
+      place = null;
+      placeMsg = "";
+      clearGhost();
+      return true;
+    }
+    if (type === "shop-next") {
+      if (!state.shop || place || state.shopKind === "freeze") return false;
+      state.shop = false;
+      state.shopKind = null;
       placeMsg = "";
       clearGhost();
       state.wave += 1;
@@ -1768,7 +1811,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
       if (turrets.length >= MAX_TURRETS) return false;
       if (state.exp < turretCost(kind)) return false;
       place = { kind, angle: aimAngle };
-      placeMsg = tooClose(aimAngle) ? "Troppo vicina" : "±2°";
+      placeMsg = tooClose(aimAngle) ? "Troppo vicina" : kind === "cannon" ? "Cono ±10°, non ruota" : "Cono ±2°, non ruota";
       syncGhost();
       return true;
     }

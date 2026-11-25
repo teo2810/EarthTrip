@@ -75,6 +75,9 @@ export function EarthTrip() {
     bossHp: 0,
     bossMax: 0,
     shop: false,
+    shopKind: null as "wave" | "freeze" | null,
+    guide: false,
+    bossHint: null as { angle: number } | null,
     mainGun: "singolo" as "singolo" | "raffica" | "mitra" | "rosa",
     autoMode: "singolo" as "singolo" | "doppio" | "bombe",
     missile: "none" as "cluster" | "limited" | "slow" | "homing" | "none",
@@ -670,16 +673,56 @@ function IconCluster() {
   );
 }
 
-const SLOT_ICON: Record<string, () => ReactNode> = {
-  fire: IconSingle,
-  rose: IconFan,
-  pod: IconTurret,
+function IconRocket() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M14 4.5c2.2 1.2 3.8 3.4 4.2 6.2l-3.4 3.4-4.2-4.2 3.4-5.4Z" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M10.6 9.9 6 14.5l3.5 3.5 4.6-4.6" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M7.2 16.8 4.8 19.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+function IconBomb() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="11" cy="13" r="5.2" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M15 9.2 18.2 6M18.2 6l1.6 2.2M18.2 6l-2.4-.4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+const OFFER_ICON: Record<string, () => ReactNode> = {
+  "gun-singolo": IconSingle,
+  "gun-raffica": IconBurst,
+  "gun-mitra": IconBurst,
+  "gun-rosa": IconFan,
+  "ammo-singolo": IconSingle,
+  "ammo-doppio": IconBurst,
+  "ammo-bombe": IconBomb,
+  "missile-basic": IconRocket,
   cluster: IconCluster,
   limited: IconHoming,
-  slow: IconHoming,
+  slow: IconFreeze,
   homing: IconHoming,
-  shield: IconShield,
-  freeze: IconFreeze,
+  "arm-cannon": IconTurret,
+  "arm-missile": IconRocket,
+};
+
+const OFFER_COPY: Record<string, string> = {
+  "gun-singolo": "Un colpo dritto e preciso. È l'unica arma con cui parti.",
+  "gun-raffica": "Tre colpi di fila, sullo stesso mirino.",
+  "gun-mitra": "Fuoco continuo. Ogni colpo fa meno danno.",
+  "gun-rosa": "Ventaglio di pallini, come un colpo a pompa.",
+  "ammo-singolo": "Ogni cannone spara un colpo, solo dentro il cono.",
+  "ammo-doppio": "Due colpi affiancati, sempre dentro il cono.",
+  "ammo-bombe": "Bomba che scoppia a distanza e pulisce un'area.",
+  "missile-basic": "Razzo dritto, senza inseguire il bersaglio.",
+  cluster: "Esplode a mezza strada e colpisce intorno.",
+  limited: "Gira poco e dura poco. Danno alto.",
+  slow: "Rallenta i nemici nella zona dell'esplosione.",
+  homing: "Il più forte: segue il bersaglio. Si sblocca per ultimo.",
+  "arm-cannon": "Torretta fissa. Spara solo in avanti, ±10°, e non ruota.",
+  "arm-missile": "Torretta fissa. Lancia un missile solo nel cono stretto di ±2°.",
 };
 
 function ZoomRail({ value, onChange }: { value: number; onChange: (t: number) => void }) {
@@ -742,6 +785,9 @@ function DefenseHud({
     bossHp?: number;
     bossMax?: number;
     shop?: boolean;
+    shopKind?: "wave" | "freeze" | null;
+    guide?: boolean;
+    bossHint?: { angle: number } | null;
     placing?: "cannon" | "missile" | null;
     placeMsg?: string;
     cannonTurrets?: number;
@@ -774,116 +820,184 @@ function DefenseHud({
   const costs = state.costs;
   const bossMax = state.bossMax ?? 0;
   const buy = (id: string) => api.current?.buyDefenseUpgrade(id);
-  const SHORT: Record<string, string> = {
-    "gun-singolo": "1",
-    "gun-raffica": "Raf",
-    "gun-mitra": "Mit",
-    "gun-rosa": "Rosa",
-    "ammo-singolo": "1",
-    "ammo-doppio": "x2",
-    "ammo-bombe": "Bom",
-    "missile-basic": "1",
-    cluster: "Grap",
-    limited: "Lim",
-    slow: "Rada",
-    homing: "Ric",
-  };
-  function chip(item: { id: string; name: string; owned: boolean; selected: boolean; cost: number; open?: boolean }) {
+  const guide = Boolean(state.guide);
+  const waveLabel = state.boss ? `B${state.wave}` : shop ? `F${state.wave}` : String(state.wave);
+  const rec = Math.max(state.highscore, Math.floor(state.score ?? 0));
+  const full = (state.cannonTurrets ?? 0) + (state.missileTurrets ?? 0) >= 6;
+  const freezeShop = state.shopKind === "freeze";
+  function offer(item: { id: string; name: string; owned: boolean; selected: boolean; cost: number; open?: boolean }) {
     const locked = item.open === false && !item.owned;
     const poor = !item.owned && exp < item.cost;
-    const label = SHORT[item.id] ?? item.name;
+    const Icon = OFFER_ICON[item.id] ?? IconSingle;
     return (
       <button
         key={item.id}
         type="button"
-        className={item.selected ? "is-on" : ""}
+        className={item.selected ? "et-buy is-on" : "et-buy"}
         disabled={locked || poor}
-        title={locked ? "Si sblocca per ultimo" : item.owned ? item.name : `${item.name} · ${item.cost} pt`}
         onClick={() => buy(item.id)}
       >
-        {item.owned ? label : `${label} ${item.cost}`}
+        <Icon />
+        <span>
+          <b>{item.name}</b>
+          <small>{locked ? "Si sblocca per ultimo, dopo gli altri missili." : OFFER_COPY[item.id]}</small>
+        </span>
+        <em>{item.owned ? (item.selected ? "Attivo" : "Tuo") : item.cost}</em>
       </button>
     );
   }
-  const waveLabel = state.boss ? `B${state.wave}` : shop ? `F${state.wave}` : String(state.wave);
-  const rec = Math.max(state.highscore, Math.floor(state.score ?? 0));
-  const full = (state.cannonTurrets ?? 0) + (state.missileTurrets ?? 0) >= 6;
+  const hint = state.bossHint;
   return (
-    <div className={frozen ? "et-def-hud is-frozen" : shop ? "et-def-hud is-shop" : "et-def-hud"}>
-      <div className="et-def-bar">
-        <span className="et-def-w" title={state.boss ? "Boss" : shop ? "Fine ondata" : "Ondata"}>{waveLabel}</span>
-        <span className="et-def-hp" title="Integrità Terra"><i style={{ width: `${Math.max(0, Math.min(100, state.earthHP))}%` }} /></span>
-        <span>{Math.round(state.earthHP)}</span>
-        <span className="et-def-pt" title="Punti">{exp}</span>
-        {state.shield ? <span className="is-shield">S{state.shield}</span> : null}
-        {frozen ? <span className="is-freeze">Gelo</span> : null}
-        <span className="et-def-rec" title="Record">★{rec}</span>
-        {state.lastRun ? <span className="et-def-last" title="Ultima partita">u{state.lastRun.score}</span> : null}
-        <button
-          type="button"
-          className={ready ? "et-lunar is-ready" : "et-lunar"}
-          aria-label="Impulso lunare"
-          disabled={!ready}
-          onClick={() => api.current?.triggerLunarPulse()}
-        >
-          <svg className="et-lunar-ring" viewBox="0 0 36 36" aria-hidden="true">
-            <circle cx="18" cy="18" r="15.5" />
-            <circle
-              cx="18"
-              cy="18"
-              r="15.5"
-              style={{ strokeDasharray: `${(Math.max(0, Math.min(100, state.lunarEnergy)) / 100) * 97.4} 97.4` }}
-            />
-          </svg>
-          <IconLunar />
-        </button>
+    <>
+      <div className={frozen ? "et-def-hud is-frozen" : "et-def-hud"}>
+        <div className="et-def-bar">
+          <span className="et-def-w" title={state.boss ? "Boss" : shop ? "Fine ondata" : "Ondata"}>{waveLabel}</span>
+          <span className="et-def-hp" title="Integrità Terra"><i style={{ width: `${Math.max(0, Math.min(100, state.earthHP))}%` }} /></span>
+          <span>{Math.round(state.earthHP)}</span>
+          <span className="et-def-pt" title="Punti">{exp}</span>
+          {state.shield ? <span className="is-shield">S{state.shield}</span> : null}
+          {frozen ? <span className="is-freeze">Gelo</span> : null}
+          {frozen && !shop && !guide ? (
+            <button type="button" className="et-freeze-shop" onClick={() => buy("freeze-shop")}>
+              Shop
+            </button>
+          ) : null}
+          <span className="et-def-rec" title="Record">★{rec}</span>
+          {state.lastRun ? <span className="et-def-last" title="Ultima partita">u{state.lastRun.score}</span> : null}
+          <button
+            type="button"
+            className={ready ? "et-lunar is-ready" : "et-lunar"}
+            aria-label="Impulso lunare"
+            disabled={!ready}
+            onClick={() => api.current?.triggerLunarPulse()}
+          >
+            <svg className="et-lunar-ring" viewBox="0 0 36 36" aria-hidden="true">
+              <circle cx="18" cy="18" r="15.5" />
+              <circle
+                cx="18"
+                cy="18"
+                r="15.5"
+                style={{ strokeDasharray: `${(Math.max(0, Math.min(100, state.lunarEnergy)) / 100) * 97.4} 97.4` }}
+              />
+            </svg>
+            <IconLunar />
+          </button>
+        </div>
+        {bossMax > 0 ? (
+          <span className="et-bossbar" aria-label="Integrità del boss">
+            <i style={{ width: `${Math.max(0, Math.min(100, ((state.bossHp ?? 0) / bossMax) * 100))}%` }} />
+          </span>
+        ) : null}
       </div>
-      {bossMax > 0 ? (
-        <span className="et-bossbar" aria-label="Integrità del boss">
-          <i style={{ width: `${Math.max(0, Math.min(100, ((state.bossHp ?? 0) / bossMax) * 100))}%` }} />
-        </span>
-      ) : null}
-      {shop ? (
-        <div className="et-shop-row" role="group" aria-label="Negozio fine ondata">
-          {placing ? (
-            <>
-              <span>±2°</span>
-              <button type="button" className="is-go" disabled={state.placeMsg === "Troppo vicina"} onClick={() => buy("place-ok")}>
-                Piazza
-              </button>
-              <button type="button" onClick={() => buy("place-no")}>
-                No
-              </button>
-              {state.placeMsg && state.placeMsg !== "±2°" ? <span>{state.placeMsg}</span> : null}
-            </>
-          ) : (
-            <>
-              {(state.guns ?? []).map(chip)}
-              <button
-                type="button"
-                disabled={!costs || exp < costs.cannon || full}
-                title="Torretta cannone, colpo singolo, cono ±2°"
-                onClick={() => buy("arm-cannon")}
-              >
-                Can {costs?.cannon ?? 40}
-              </button>
-              <button
-                type="button"
-                disabled={!costs || exp < costs.missile || full}
-                title="Lancia missili, cono ±2°"
-                onClick={() => buy("arm-missile")}
-              >
-                Mis {costs?.missile ?? 55}
-              </button>
-              {(state.cannonTurrets ?? 0) > 0 ? (state.ammo ?? []).map(chip) : null}
-              {(state.missileTurrets ?? 0) > 0 ? (state.missiles ?? []).map(chip) : null}
-              <button type="button" className="is-go" onClick={() => buy("shop-next")} aria-label="Continua">
-                ▶
-              </button>
-            </>
-          )}
+      {hint && !shop && !guide && !placing ? (
+        <div
+          className="et-boss-arrow"
+          style={{
+            left: `calc(50% + ${Math.cos(hint.angle) * 34}vmin)`,
+            top: `calc(50% - ${Math.sin(hint.angle) * 34}vmin)`,
+            transform: `translate(-50%, -50%) rotate(${-hint.angle}rad)`,
+          }}
+        >
+          <i />
+          Boss
         </div>
       ) : null}
-    </div>
+      {placing ? (
+        <div className="et-place-bar">
+          <p>{state.placeMsg || "Trascina intorno alla Terra"}</p>
+          <button type="button" className="is-go" disabled={state.placeMsg === "Troppo vicina"} onClick={() => buy("place-ok")}>
+            Piazza
+          </button>
+          <button type="button" onClick={() => buy("place-no")}>
+            Annulla
+          </button>
+        </div>
+      ) : null}
+      {guide ? (
+        <div className="et-modal" role="dialog" aria-label="Mini guida">
+          <div className="et-modal-card">
+            <header>
+              <h2>Difendi la Terra</h2>
+            </header>
+            <ol className="et-guide-list">
+              <li>Trascina per mirare. Parti solo con il cannone e il colpo singolo.</li>
+              <li>I punti si spendono a fine ondata, in una scheda: armi, torrette, missili.</li>
+              <li>Le torrette restano ferme. I cannoni sparano in un cono di ±10°, i missili in ±2°.</li>
+              <li>Ogni ondata chiude con un boss. Se è fuori schermo, una freccia indica dov'è. Dal livello 3 spara anche lui.</li>
+              <li>I bonus cadono dai nemici. Il gelo ferma tutto e, se vuoi, apre lo shop.</li>
+            </ol>
+            <button type="button" className="et-modal-go" onClick={() => buy("guide-ok")}>
+              Combatti
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {shop && !placing && !guide ? (
+        <div className="et-modal" role="dialog" aria-label={freezeShop ? "Shop del gelo" : "Shop fine ondata"}>
+          <div className="et-modal-card">
+            <header>
+              <h2>{freezeShop ? "Shop del gelo" : `Fine ondata ${state.wave}`}</h2>
+              <span>{exp} pt</span>
+            </header>
+            <div className="et-modal-scroll">
+              <section>
+                <p className="et-buy-sec">Cannone personale</p>
+                <div className="et-buy-list">{(state.guns ?? []).map(offer)}</div>
+              </section>
+              <section>
+                <p className="et-buy-sec">Torrette</p>
+                <div className="et-buy-list">
+                  <button
+                    type="button"
+                    className="et-buy"
+                    disabled={!costs || exp < costs.cannon || full}
+                    onClick={() => buy("arm-cannon")}
+                  >
+                    <IconTurret />
+                    <span>
+                      <b>Cannone</b>
+                      <small>{OFFER_COPY["arm-cannon"]} Poi scegli dove metterlo.</small>
+                    </span>
+                    <em>{costs?.cannon ?? 40}</em>
+                  </button>
+                  <button
+                    type="button"
+                    className="et-buy"
+                    disabled={!costs || exp < costs.missile || full}
+                    onClick={() => buy("arm-missile")}
+                  >
+                    <IconRocket />
+                    <span>
+                      <b>Lancia missili</b>
+                      <small>{OFFER_COPY["arm-missile"]} Poi scegli dove metterlo.</small>
+                    </span>
+                    <em>{costs?.missile ?? 55}</em>
+                  </button>
+                </div>
+              </section>
+              {(state.cannonTurrets ?? 0) > 0 ? (
+                <section>
+                  <p className="et-buy-sec">Colpi dei cannoni</p>
+                  <div className="et-buy-list">{(state.ammo ?? []).map(offer)}</div>
+                </section>
+              ) : null}
+              {(state.missileTurrets ?? 0) > 0 ? (
+                <section>
+                  <p className="et-buy-sec">Missili</p>
+                  <div className="et-buy-list">{(state.missiles ?? []).map(offer)}</div>
+                </section>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              className="et-modal-go"
+              onClick={() => buy(freezeShop ? "shop-close" : "shop-next")}
+            >
+              {freezeShop ? "Torna al gelo" : "Continua"}
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
