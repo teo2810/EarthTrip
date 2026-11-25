@@ -2311,7 +2311,8 @@ export function createDefenseMode(hooks: DefenseHooks) {
       resumeRun(savedRun);
       return true;
     }
-    if (phase !== "play") return false;
+    // Lo shop ripreso funziona già durante l'ingresso della camera: un tocco su Continua non va perso sui dispositivi lenti.
+    if (phase !== "play" && phase !== "enter") return false;
     if (type === "pause") return pause();
     if (type === "unpause") {
       if (!paused) return false;
