@@ -21,6 +21,11 @@ const MOON_R = 0.2727;
 const AU_KM = 149_597_870.7;
 const MOON_VISUAL = 16;
 const ORBIT_STEPS = 72;
+/** Vista iniziale e «Globale»: Italia al centro, Terra intera in inquadratura. */
+const HOME_LAT = 42;
+const HOME_LON = 12.5;
+/** Atmosfera (raggio 1,045) più un piccolo margine. */
+const HOME_FIT = 1.12;
 
 const TEX = {
   day: "https://cdn.jsdelivr.net/npm/three-globe@2.41.12/example/img/earth-blue-marble.jpg",
@@ -468,7 +473,48 @@ export function mountEarth(
   });
 
   if (typeof location !== "undefined" && location.search.includes("etdebug")) {
-    (window as unknown as { __etDefense?: typeof defense }).__etDefense = defense;
+    const debugWin = window as unknown as { __etDefense?: typeof defense; __etEarth?: Record<string, unknown> };
+    debugWin.__etDefense = defense;
+    debugWin.__etEarth = {
+      globe: () => {
+        const dist = camera.position.length();
+        const look = lookAtEarth();
+        const vHalf = THREE.MathUtils.degToRad(camera.fov * 0.5);
+        const hHalf = Math.atan(Math.tan(vHalf) * Math.max(1e-4, camera.aspect));
+        const half = Math.min(vHalf, hHalf);
+        const ang = Math.asin(Math.min(1, 1.045 / Math.max(dist, 1.046)));
+        return {
+          dist,
+          fit: globeFitDistance(),
+          look,
+          fov: camera.fov,
+          aspect: camera.aspect,
+          fits: ang <= half + 1e-4,
+          homeView,
+          viewOffset: camera.view && camera.view.enabled
+            ? { x: camera.view.offsetX, y: camera.view.offsetY, w: camera.view.fullWidth, h: camera.view.fullHeight }
+            : null,
+        };
+      },
+      selectionScreen: () => {
+        const w = viewport.clientWidth;
+        const h = viewport.clientHeight;
+        let pos: THREE.Vector3 | null = null;
+        if (selectedNorad != null) {
+          const sat = sats.find((s) => s.raw.norad === selectedNorad);
+          if (sat) pos = sat.pos.clone();
+        } else if (selectedMoon != null) {
+          const feature = MOON_FEATURES[selectedMoon];
+          if (feature) {
+            moonPivot.updateWorldMatrix(true, false);
+            pos = moonPivot.localToWorld(latLonToThree(feature.lat, feature.lon, MOON_R));
+          }
+        }
+        if (!pos) return null;
+        const ndc = pos.project(camera);
+        return { x: (ndc.x * 0.5 + 0.5) * w, y: (-ndc.y * 0.5 + 0.5) * h, visible: ndc.z <= 1 };
+      },
+    };
   }
   const onPointerMove = (e: PointerEvent | TouchEvent) => defense.onPointer(e);
   canvas.addEventListener("pointermove", onPointerMove);
@@ -696,7 +742,79 @@ export function mountEarth(
   void refreshTle();
   void loadGeography();
 
-  camera.position.copy(latLonToThree(18, -32, 3.05));
+  /** Finché l'utente non ruota o zooma, la vista resta quella iniziale (Italia, Terra intera). */
+  let homeView = true;
+  controls.addEventListener("start", () => {
+    homeView = false;
+  });
+
+  /** Distanza camera–origine perché la sfera stia nel FOV più stretto (orizzontale o verticale). */
+  function globeFitDistance() {
+    const vHalf = THREE.MathUtils.degToRad(camera.fov * 0.5);
+    const aspect = Math.max(1e-4, camera.aspect);
+    const hHalf = Math.atan(Math.tan(vHalf) * aspect);
+    const half = Math.min(vHalf, hHalf);
+    return HOME_FIT / Math.sin(half);
+  }
+  function homePos() {
+    return latLonToThree(HOME_LAT, HOME_LON, globeFitDistance());
+  }
+
+  /**
+   * Su telefono la scheda .et-card copre il centro: sposta il centro della vista
+   * nell'area libera (sopra la scheda in portrait, accanto in landscape).
+   */
+  function syncCardOffset() {
+    const w = viewport.clientWidth;
+    const h = viewport.clientHeight;
+    if (w < 2 || h < 2) return;
+    const root = viewport.closest(".et-root") as HTMLElement | null;
+    const defenseOn = defense.state.active || !!root?.classList.contains("is-defense");
+    const card = !defenseOn && w < 960 ? (root ?? document).querySelector(".et-card") as HTMLElement | null : null;
+    const style = card ? getComputedStyle(card) : null;
+    const visible = !!card && style !== null && style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity) > 0.05;
+    if (!visible || !card) {
+      if (camera.view) {
+        camera.clearViewOffset();
+      }
+      return;
+    }
+    const cr = card.getBoundingClientRect();
+    const vr = viewport.getBoundingClientRect();
+    const left = cr.left - vr.left;
+    const right = cr.right - vr.left;
+    const top = cr.top - vr.top;
+    let fx: number;
+    let fy: number;
+    let fw: number;
+    let fh: number;
+    if (h >= w) {
+      fx = 0;
+      fy = 0;
+      fw = w;
+      fh = Math.max(48, top);
+    } else if ((left + right) * 0.5 <= w * 0.5) {
+      fx = Math.max(0, right);
+      fy = 0;
+      fw = Math.max(48, w - fx);
+      fh = h;
+    } else {
+      fx = 0;
+      fy = 0;
+      fw = Math.max(48, left);
+      fh = h;
+    }
+    camera.setViewOffset(w, h, w * 0.5 - (fx + fw * 0.5), h * 0.5 - (fy + fh * 0.5), w, h);
+  }
+
+  function applyHomeView() {
+    if (!homeView || view !== "globe" || surfaceLock) return;
+    camera.position.copy(homePos());
+    controls.target.set(0, 0, 0);
+    controls.update();
+  }
+
+  camera.position.copy(latLonToThree(HOME_LAT, HOME_LON, 3.05));
   controls.target.set(0, 0, 0);
   controls.update();
 
@@ -705,6 +823,8 @@ export function mountEarth(
     const h = viewport.clientHeight;
     if (w < 2 || h < 2) return;
     camera.aspect = w / h;
+    applyHomeView();
+    syncCardOffset();
     camera.updateProjectionMatrix();
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, w < 800 ? 1.15 : 1.35));
     renderer.setSize(w, h, false);
@@ -787,6 +907,7 @@ export function mountEarth(
         }
         updateOrbits(date, 16);
       }
+      if (homeView && view === "globe" && !inDefense) controls.autoRotate = false;
       if (inDefense) {
         defense.update(dt);
         controls.enabled = false;
@@ -828,6 +949,7 @@ export function mountEarth(
         camera.near = nr;
         camera.updateProjectionMatrix();
       }
+      syncCardOffset();
       renderer.render(scene, camera);
       countFps();
       if (!readySent) {
@@ -1432,6 +1554,7 @@ export function mountEarth(
   function goIss() {
     const sat = sats.find((s) => s.raw.name.toUpperCase().includes("ZARYA")) ?? sats.find((s) => s.featured);
     if (!sat) return;
+    homeView = false;
     followNorad = sat.raw.norad;
     selectedNorad = sat.raw.norad;
     selectedMoon = null;
@@ -1444,6 +1567,7 @@ export function mountEarth(
   }
 
   function goMoon() {
+    homeView = false;
     followNorad = null;
     view = "moon";
     const pos = moonPivot.position.clone();
@@ -1457,13 +1581,16 @@ export function mountEarth(
   function goGlobal() {
     followNorad = null;
     view = "globe";
-    startAnim(latLonToThree(18, -32, 3.05), new THREE.Vector3(), 1.15, () => {
+    homeView = true;
+    startAnim(homePos(), new THREE.Vector3(), 1.15, () => {
       mode = "globe";
+      applyHomeView();
     });
     publish(true);
   }
 
   function goSurface() {
+    homeView = false;
     followNorad = null;
     if (camera.position.distanceTo(moonPivot.position) < 4) {
       goMoon();
@@ -1486,13 +1613,14 @@ export function mountEarth(
     mapEl.classList.remove("is-hot");
     view = "globe";
     const dir = camera.position.clone().normalize();
-    startAnim(dir.multiplyScalar(3.05), new THREE.Vector3(), 1, () => {
+    startAnim(dir.multiplyScalar(globeFitDistance()), new THREE.Vector3(), 1, () => {
       mode = "globe";
     });
     publish(true);
   }
 
   function focusSelection() {
+    homeView = false;
     if (selectedNorad != null) {
       const sat = sats.find((s) => s.raw.norad === selectedNorad);
       if (!sat) return;

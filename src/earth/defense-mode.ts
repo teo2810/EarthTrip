@@ -76,6 +76,7 @@ type SaveFile = {
 };
 
 type Enemy = {
+  id: number;
   mesh: THREE.Mesh;
   speed: number;
   hp: number;
@@ -112,13 +113,26 @@ type Shot = {
   blast: number;
   blastDmg: number;
   color: number;
-  /** Nemici già colpiti da questo proiettile (i perforanti non colpiscono due volte lo stesso). */
-  hits: Set<Enemy> | null;
+  /** Id dei nemici già colpiti da questo proiettile: ogni nemico al massimo una volta. */
+  hits: Set<number>;
   /** Ultimo nemico colpito direttamente: l'esplosione non lo colpisce una seconda volta. */
   direct: Enemy | null;
   /** Posizione al frame precedente, per il test di collisione sul segmento percorso. */
   prev: THREE.Vector3;
 };
+
+let enemySeq = 1;
+
+/** Raggio visibile: anelli del boss (×1,9) e della nave tesoro (×1,5) compresi. */
+function visualRadius(e: Enemy) {
+  if (e.boss) return e.radius * 1.9 + 0.018;
+  if (e.treasure) return e.radius * 1.5 + 0.025;
+  return e.radius;
+}
+
+function shotPad(kind: ShotKind) {
+  return kind === "bolt" ? 0.16 : 0.26;
+}
 type Spark = { mesh: THREE.Mesh; vel: THREE.Vector3; life: number };
 type Shard = { mesh: THREE.Mesh; vel: THREE.Vector3; spin: THREE.Vector3 };
 type DropKind = "shield" | "freeze" | "repair";
@@ -226,8 +240,8 @@ export function loadSave(): SaveFile {
   return { v: 2, highscore, best, last, bestCleared, run: migrateRun(file.run) };
 }
 
-/** Distanza al quadrato tra il punto p e il segmento a→b, sul piano di gioco. */
-function segDistSq(a: THREE.Vector3, b: THREE.Vector3, p: THREE.Vector3) {
+/** Punto più vicino a p sul segmento a→b (piano di gioco) e distanza al quadrato. */
+function segClosest(a: THREE.Vector3, b: THREE.Vector3, p: THREE.Vector3) {
   const abx = b.x - a.x;
   const aby = b.y - a.y;
   const len = abx * abx + aby * aby;
@@ -235,7 +249,7 @@ function segDistSq(a: THREE.Vector3, b: THREE.Vector3, p: THREE.Vector3) {
   t = t < 0 ? 0 : t > 1 ? 1 : t;
   const dx = a.x + abx * t - p.x;
   const dy = a.y + aby * t - p.y;
-  return dx * dx + dy * dy;
+  return { t, d2: dx * dx + dy * dy };
 }
 
 export function createDefenseMode(hooks: DefenseHooks) {
@@ -243,6 +257,8 @@ export function createDefenseMode(hooks: DefenseHooks) {
     && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const saved = loadSave();
   let savedRun: RunSave | null = saved.run;
+  /** Test automatici: niente spawn, niente armi automatiche, i nemici restano fermi. */
+  let sandbox = false;
   const state: DefenseState = {
     active: false,
     wave: 1,
@@ -1173,6 +1189,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
     hooks.getScene().add(mesh);
     const speed = boss ? 0.34 + state.wave * 0.025 : 0.46 + state.wave * 0.04;
     enemies.push({
+      id: enemySeq++,
       mesh,
       speed,
       hp,
@@ -1325,6 +1342,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
     hooks.getScene().add(mesh);
     const hp = t.hp + state.wave * t.hpPerWave;
     enemies.push({
+      id: enemySeq++,
       mesh, speed: t.speed, hp, maxHp: hp, boss: false, radius: t.radius, mode: "strafe", modeT: 0,
       strafe: side, shotT: 1.2, slow: 0, entering: 0, treasure: true, vel, seen: false, tele: 0, teleAngle: 0,
     });
@@ -1419,7 +1437,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
       blast,
       blastDmg,
       color,
-      hits: pierce > 1 ? new Set<Enemy>() : null,
+      hits: new Set<number>(),
       direct: null,
       prev: mesh.position.clone(),
     });
@@ -1553,7 +1571,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
     grow();
     for (let j = enemies.length - 1; j >= 0; j -= 1) {
       if (enemies[j] === skip || !targetable(enemies[j])) continue;
-      if (enemies[j].mesh.position.distanceTo(pos) > radius + enemies[j].radius) continue;
+      if (enemies[j].mesh.position.distanceTo(pos) > radius + visualRadius(enemies[j])) continue;
       enemies[j].hp -= dmg;
       if (enemies[j].hp <= 0) killEnemy(j);
     }
@@ -1567,7 +1585,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
   function applySlow(pos: THREE.Vector3, radius: number, dmg: number) {
     const slowFor = BALANCE.missiles.rada.slowFor;
     for (const e of enemies) {
-      if (targetable(e) && e.mesh.position.distanceTo(pos) < radius + e.radius) e.slow = Math.max(e.slow, slowFor);
+      if (targetable(e) && e.mesh.position.distanceTo(pos) < radius + visualRadius(e)) e.slow = Math.max(e.slow, slowFor);
     }
     areaBlast(pos, radius, dmg, 0xc9b6ff);
   }
@@ -1876,6 +1894,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
 
     if (state.guide || paused) return;
 
+    if (!sandbox) {
     if (state.freezeLeft > 0 && !state.shop) {
       state.freezeLeft = Math.max(0, state.freezeLeft - dt);
     } else if (!state.shop && state.freezeLeft <= 0 && !bossSpawned) {
@@ -2088,6 +2107,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
     } else if (fireCooldown < 0) fireCooldown = 0;
     // Gelo: i nemici sono fermi, ma torrette, missili e scudo continuano a lavorare.
     if (!state.shop && threats) fireAuto();
+    }
 
     for (let i = projectiles.length - 1; i >= 0; i -= 1) {
       const p = projectiles[i];
@@ -2118,36 +2138,55 @@ export function createDefenseMode(hooks: DefenseHooks) {
       p.life -= dt;
       const ranged = (p.kind === "grappolo" || p.kind === "bomb" || p.kind === "termobarica" || p.kind === "bolt") && p.traveled >= p.range;
       let spent = p.life <= 0 || ranged;
-      // Collisioni sul segmento percorso in questo frame: i colpi veloci (Mitra) non attraversano più i bersagli.
+      // Collisioni sul segmento: si prende il bersaglio più vicino, non il primo in lista.
+      // Senza pierce il colpo si ferma lì; con pierce ogni nemico viene danneggiato al massimo una volta.
       if (!spent) {
-        for (let h = hostiles.length - 1; h >= 0; h -= 1) {
-          if (segDistSq(p.prev, p.mesh.position, hostiles[h].mesh.position) > 0.09) continue;
-          hostiles[h].hp -= p.kind === "bolt" || p.kind === "bomb" ? 1 : 2;
-          burst(p.mesh.position, 0xffb199, 4);
-          if (hostiles[h].hp <= 0) {
-            disposeObject(hostiles[h].mesh);
-            hostiles.splice(h, 1);
-            gain(3, 1);
-          }
-          if (p.pierce > 1) p.pierce -= 1;
-          else spent = true;
-          break;
+        const cand: { t: number; enemy?: Enemy; hostile?: Hostile }[] = [];
+        for (const h of hostiles) {
+          const hit = segClosest(p.prev, p.mesh.position, h.mesh.position);
+          if (hit.d2 <= 0.09) cand.push({ t: hit.t, hostile: h });
         }
-      }
-      if (!spent) {
-        for (let j = enemies.length - 1; j >= 0; j -= 1) {
-          const e = enemies[j];
-          if (p.hits?.has(e) || !targetable(e)) continue;
-          const reach = e.radius + (p.kind === "bolt" ? 0.16 : 0.26);
-          if (segDistSq(p.prev, p.mesh.position, e.mesh.position) > reach * reach) continue;
+        for (const e of enemies) {
+          if (p.hits.has(e.id) || !targetable(e)) continue;
+          const reach = visualRadius(e) + shotPad(p.kind);
+          const hit = segClosest(p.prev, p.mesh.position, e.mesh.position);
+          if (hit.d2 <= reach * reach) cand.push({ t: hit.t, enemy: e });
+        }
+        cand.sort((a, b) => a.t - b.t);
+        for (const c of cand) {
+          const atX = p.prev.x + (p.mesh.position.x - p.prev.x) * c.t;
+          const atY = p.prev.y + (p.mesh.position.y - p.prev.y) * c.t;
+          const at = tmpB.set(atX, atY, p.mesh.position.z);
+          if (c.hostile) {
+            const h = c.hostile;
+            const hi = hostiles.indexOf(h);
+            if (hi < 0) continue;
+            h.hp -= p.kind === "bolt" || p.kind === "bomb" ? 1 : 2;
+            burst(at, 0xffb199, 4);
+            if (h.hp <= 0) {
+              disposeObject(h.mesh);
+              hostiles.splice(hi, 1);
+              gain(3, 1);
+            }
+            if (p.pierce > 1) p.pierce -= 1;
+            else {
+              p.mesh.position.copy(at);
+              spent = true;
+              break;
+            }
+            continue;
+          }
+          const e = c.enemy;
+          if (!e || p.hits.has(e.id) || !targetable(e)) continue;
           e.hp -= p.damage;
+          p.hits.add(e.id);
           p.direct = p.damage > 0 ? e : null;
-          burst(p.mesh.position, p.color, Math.min(14, 3 + Math.round(p.damage * 3)));
-          if (e.hp <= 0) killEnemy(j);
-          if (p.pierce > 1) {
-            p.pierce -= 1;
-            p.hits?.add(e);
-          } else {
+          burst(at, p.color, Math.min(14, 3 + Math.round(p.damage * 3)));
+          const ji = enemies.indexOf(e);
+          if (e.hp <= 0 && ji >= 0) killEnemy(ji);
+          if (p.pierce > 1) p.pierce -= 1;
+          else {
+            p.mesh.position.copy(at);
             spent = true;
             break;
           }
@@ -2448,7 +2487,8 @@ export function createDefenseMode(hooks: DefenseHooks) {
       bossWarn,
       coins: coins.length,
       hostiles: hostiles.length,
-      enemies: enemies.map((e) => ({ treasure: e.treasure, tele: e.tele, teleAngle: e.teleAngle, boss: e.boss, entering: e.entering, hp: e.hp, maxHp: e.maxHp, x: e.mesh.position.x, y: e.mesh.position.y, radius: e.radius, onScreen: onScreen(e.mesh.position, e.boss ? e.radius : 0), targetable: targetable(e) })),
+      enemies: enemies.map((e) => ({ id: e.id, treasure: e.treasure, tele: e.tele, teleAngle: e.teleAngle, boss: e.boss, entering: e.entering, hp: e.hp, maxHp: e.maxHp, x: e.mesh.position.x, y: e.mesh.position.y, radius: e.radius, visual: visualRadius(e), onScreen: onScreen(e.mesh.position, e.boss ? e.radius : 0), targetable: targetable(e) })),
+      projectiles: projectiles.length,
       turrets: turrets.map((t) => ({ kind: t.kind, cd: t.cd })),
       cooldowns: Object.fromEntries(MISSILES.map((id) => [id, warheadCooldown(id)])),
       gun: gunStats(state.mainGun),
@@ -2478,6 +2518,107 @@ export function createDefenseMode(hooks: DefenseHooks) {
       const b = enemies.find((e) => e.boss);
       if (b) b.hp = b.maxHp * frac;
       return Boolean(b);
+    },
+    sandbox: (on: boolean) => {
+      sandbox = on;
+      if (!on) return;
+      for (const e of enemies) disposeObject(e.mesh);
+      for (const p of projectiles) disposeObject(p.mesh);
+      for (const h of hostiles) disposeObject(h.mesh);
+      enemies.length = 0;
+      projectiles.length = 0;
+      hostiles.length = 0;
+      spawnTimer = 0;
+      bossWarn = 0;
+      trashSpawned = trashQuota;
+      treasureAt = -1;
+      fireCooldown = 99;
+      state.freezeLeft = 0;
+      state.shop = false;
+      state.earthHP = 100;
+    },
+    spawnDummy: (opts: { x: number; y: number; radius?: number; hp?: number; boss?: boolean; treasure?: boolean }) => {
+      const radius = opts.radius ?? 0.16;
+      const boss = !!opts.boss;
+      const treasure = !!opts.treasure;
+      const mesh = boss
+        ? new THREE.Mesh(
+            new THREE.IcosahedronGeometry(radius, 0),
+            new THREE.MeshStandardMaterial({ color: 0xff8a1e, emissive: 0x7a2c00, emissiveIntensity: 0.9, metalness: 0.25, roughness: 0.38 }),
+          )
+        : new THREE.Mesh(
+            new THREE.OctahedronGeometry(radius, 0),
+            treasure
+              ? new THREE.MeshStandardMaterial({ color: 0xffd24a, emissive: 0x6a4a00, emissiveIntensity: 0.9, metalness: 0.6, roughness: 0.3 })
+              : trashMat,
+          );
+      if (boss) {
+        const halo = new THREE.Mesh(
+          new THREE.TorusGeometry(radius * 1.55, 0.04, 8, 28),
+          new THREE.MeshBasicMaterial({ color: 0xffb15a, transparent: true, opacity: 0.95 }),
+        );
+        halo.rotation.x = Math.PI / 2;
+        const ring = new THREE.Mesh(
+          new THREE.TorusGeometry(radius * 1.9, 0.018, 6, 32),
+          new THREE.MeshBasicMaterial({ color: 0xfff1c2, transparent: true, opacity: 0.8 }),
+        );
+        mesh.add(halo, ring);
+      }
+      if (treasure) {
+        mesh.add(
+          new THREE.Mesh(
+            new THREE.TorusGeometry(radius * 1.5, 0.025, 6, 28),
+            new THREE.MeshBasicMaterial({ color: 0xfff1a8, transparent: true, opacity: 0.85 }),
+          ),
+        );
+      }
+      mesh.position.set(opts.x, opts.y, 0);
+      hooks.getScene().add(mesh);
+      const hp = opts.hp ?? 20;
+      const e: Enemy = {
+        id: enemySeq++,
+        mesh,
+        speed: 0,
+        hp,
+        maxHp: hp,
+        boss,
+        radius,
+        mode: "strafe",
+        modeT: 0,
+        strafe: 1,
+        shotT: 99,
+        slow: 0,
+        entering: 0,
+        treasure,
+        vel: null,
+        seen: true,
+        tele: 0,
+        teleAngle: 0,
+      };
+      enemies.push(e);
+      return { id: e.id, radius: e.radius, visual: visualRadius(e) };
+    },
+    fireTest: (opts: { x: number; y: number; vx: number; vy: number; damage?: number; pierce?: number; range?: number }) => {
+      const mesh = new THREE.Mesh(GEO.ball, basicMat(0x7dfff0));
+      mesh.scale.setScalar(0.04);
+      mesh.position.set(opts.x, opts.y, 0.05);
+      hooks.getScene().add(mesh);
+      projectiles.push({
+        mesh,
+        vel: new THREE.Vector3(opts.vx, opts.vy, 0),
+        life: 8,
+        damage: opts.damage ?? 1,
+        kind: "bolt",
+        traveled: 0,
+        range: opts.range ?? 18,
+        pierce: opts.pierce ?? 1,
+        blast: 0,
+        blastDmg: 0,
+        color: 0x7dfff0,
+        hits: new Set<number>(),
+        direct: null,
+        prev: mesh.position.clone(),
+      });
     },
   };
 

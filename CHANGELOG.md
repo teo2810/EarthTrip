@@ -1,5 +1,14 @@
 # Changelog
 
+## v21 · 2026-11-26
+
+Correzioni sulla v20 (`07b5b31`).
+
+- Vista globo iniziale e pulsante Globale: la Terra entra tutta nell'inquadratura (distanza calcolata dal FOV più stretto e dal rapporto d'aspetto, con un piccolo margine sull'atmosfera) ed è centrata sull'Italia (42°N, 12,5°E). `setView` di Leaflet resta allineato alla camera.
+- I colpi si fermano al primo nemico toccato, salvo pierce; ogni proiettile danneggia ogni nemico al massimo una volta (id tenuti sul colpo). Si prende l'impatto più vicino sul segmento percorso. Boss e navi tesoro usano il raggio visibile (anelli compresi).
+- Su telefono, con una scheda `.et-card` aperta, il bersaglio è centrato nell'area libera: sopra la scheda in portrait, accanto in landscape, con `camera.setViewOffset` misurato sulla card. L'offset si aggiorna al ridimensionamento e si toglie quando la scheda si chiude.
+
+
 ## v20 · 2026-11-25
 
 Applicate tutte le voci dell'audit su v19 (`eae3f25`), con i numeri di Math_Calc e le note di QA_Docs e UI_UX.

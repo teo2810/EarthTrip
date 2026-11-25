@@ -10,13 +10,13 @@ Globo interattivo di Terra e Luna.
 
 Interfaccia in italiano. I dati restano nel browser.
 La copia statica per GitHub Pages è in `docs/`: `index.html`, `style.css`, il bundle versionato `app-v<N>.js`
-(oggi `app-v20.js`), `sw.js` (cache `earthtrip-v<N>` più `earth-assets-v1` per texture e dati dei CDN), `manifest.json` e le icone.
+(oggi `app-v21.js`), `sw.js` (cache `earthtrip-v<N>` più `earth-assets-v1` per texture e dati dei CDN), `manifest.json` e le icone.
 
 ## Sviluppo e build
 
 - `npm run dev`: app di sviluppo (TanStack Start) su `http://localhost:8080`.
-- `npm run build:docs -- 20`: rigenera `docs/` con `vite.client.config.ts` (bundle IIFE + `style.css` estratto),
-  rinomina il bundle in `app-v20.js`, cancella i bundle precedenti, copia le icone della PWA da `public/` e aggiorna
+- `npm run build:docs -- 21`: rigenera `docs/` con `vite.client.config.ts` (bundle IIFE + `style.css` estratto),
+  rinomina il bundle in `app-v21.js`, cancella i bundle precedenti, copia le icone della PWA da `public/` e aggiorna
   `index.html` e `sw.js`. Script: `scripts/build-docs.mjs`.
 - `npm run lint`, `npm run typecheck`.
 - Le versioni sono descritte in `CHANGELOG.md`.
