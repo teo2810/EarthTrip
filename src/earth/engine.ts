@@ -1704,9 +1704,15 @@ export function mountEarth(
         const lat = coords[1];
         const name = String(props.name ?? "");
         if (!name || lat == null || lon == null) continue;
+        // Città del Vaticano coincide con Roma: a ogni zoom ne nasconderebbe l'etichetta.
+        if (name === "Vatican City") continue;
         const el = document.createElement("div");
         el.className = "et-label is-capital";
-        el.textContent = IT_CITY[name] ?? name;
+        // Il pallino è un elemento vero, ancorato al punto esatto della capitale; il nome sta alla sua destra.
+        const dot = document.createElement("i");
+        dot.className = "et-dot";
+        dot.setAttribute("aria-hidden", "true");
+        el.append(dot, document.createTextNode(IT_CITY[name] ?? name));
         labelsEl.appendChild(el);
         geoLabels.push({ el, lat, lon, kind: "capital", weight: Math.max(Number(props.pop_max ?? 0), 1) });
       }
@@ -2237,7 +2243,6 @@ const IT_CITY: Record<string, string> = {
   Florence: "Firenze",
   Cairo: "Il Cairo",
   "The Hague": "L'Aia",
-  "Vatican City": "Città del Vaticano",
   Ljubljana: "Lubiana",
   Washington: "Washington",
   "Washington, D.C.": "Washington",

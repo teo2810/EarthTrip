@@ -1,5 +1,10 @@
 # Changelog
 
+## v23 · 2026-11-26
+
+- Capitali fuori posto (Roma in mare): conversione lat/lon, texture, confini e Leaflet erano già allineati; era l'etichetta. Tutta l'etichetta era centrata sopra il punto (`translate(-50%, -120%)`) e il pallino, a sinistra del nome, finiva mezza etichetta più a ovest e una riga più su (25–50 px, 0,6–1,3°). Ora il pallino è un elemento ancorato al punto esatto e il nome sta alla sua destra.
+- Città del Vaticano non compare più: coincideva con Roma e ne nascondeva l'etichetta.
+
 ## v22 · 2026-11-26
 
 Correzioni sulla v21 (`1518c38`).

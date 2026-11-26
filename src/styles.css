@@ -163,16 +163,24 @@
     0 0 8px #07090c;
 }
 
-.et-label.is-capital::before {
-  content: "";
+/*
+ * Capitali: il punto (left/top) è la posizione vera della città. Il pallino è centrato lì e il nome sta alla
+ * sua destra. Prima tutta l'etichetta era centrata sopra il punto (translate(-50%, -120%)) e il pallino,
+ * a sinistra del testo, finiva mezza etichetta più a ovest e una riga più su: Roma in mare.
+ */
+.et-label.is-capital {
+  line-height: 1.2;
+  transform: translate(-0.2rem, -50%);
+}
+.et-label.is-capital .et-dot {
   display: inline-block;
-  width: 0.28rem;
-  height: 0.28rem;
-  margin-right: 0.28rem;
+  vertical-align: middle;
+  width: 0.4rem;
+  height: 0.4rem;
+  margin-right: 0.3rem;
   border-radius: 999px;
   background: var(--color-fg);
   box-shadow: 0 0 0 1px #07090c;
-  transform: translateY(0.05rem);
 }
 
 .et-top,
