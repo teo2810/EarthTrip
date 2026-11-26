@@ -7,7 +7,7 @@
 - Asteroide Anomalo: nella fase 1 è una corazza che si frantuma dopo N colpi. Nella fase 2 esce un nucleo instabile che salta tra quote vicine e lontane con un rimbalzo, e lo zoom lo regola il giocatore con lo slider.
 - Attacchi comuni: un laser che spazza lentamente un arco e danneggia la Terra se il cannone resta nel raggio, e una pioggia di asteroidi piccoli dai bordi, fatta con i detriti normali.
 - Punto debole dinamico: si scopre ogni pochi secondi ed è annunciato da un suono di carica sintetizzato con WebAudio. Lì il colpo fa critico ×3 (scritta «CRITICO ×3» e lampo); altrove fa danno ridotto (scintilla) o rimbalza. Con la riduzione del movimento la scritta resta ferma e non ci sono lampi né scosse.
-- Restano le regole di prima: niente perforazione, il boss in ingresso blocca i colpi senza danno, la rotazione della Terra viene ripristinata all'uscita. Tutti i numeri stanno in `BALANCE.boss` e sono provvisori.
+- Restano le regole di prima: niente perforazione, il boss in ingresso blocca i colpi senza danno, la rotazione della Terra viene ripristinata all'uscita. I numeri in `BALANCE.boss` sono quelli tarati da Math_Calc (hpBase 30, hpPerWave 28, critMult 3, offMult 0,5, weakEvery 6, weakOpen 2,4, armorHitsBase 18, coreHopEvery 4, attackEvery 7,5, laser.sweepDegPerS 18).
 
 ## v23 · 2026-11-26
 

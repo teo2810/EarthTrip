@@ -105,22 +105,22 @@ export const BALANCE = {
     fireCapWave: 10,
     shotsCap: 4,
 
-    /* ── v24: sistema dei boss (valori provvisori, da tarare con Math_Calc) ── */
+    /* ── v24: sistema dei boss (valori tarati da Math_Calc) ── */
     /** Ondate dispari: Satellite Madre; pari: Asteroide Anomalo. */
-    hpBase: 22,
-    hpPerWave: 8,
+    hpBase: 30,
+    hpPerWave: 28,
     /** Danno nel punto debole scoperto. */
     critMult: 3,
     /** Danno fuori dal punto debole (scafo o nucleo coperto). */
-    offMult: 0.35,
+    offMult: 0.5,
     /** Ciclo del punto debole: chiuso weakEvery s, suono di carica weakWarn s prima, scoperto weakOpen s. */
-    weakEvery: 5.5,
+    weakEvery: 6,
     weakWarn: 0.7,
-    weakOpen: 1.8,
+    weakOpen: 2.4,
     /** Raggio del punto debole rispetto al raggio del boss. */
     weakFrac: 0.6,
     /** Secondi tra due attacchi comuni (si alternano laser e pioggia). */
-    attackEvery: 6.5,
+    attackEvery: 7.5,
     madre: {
       /** Velocità lungo l'ellisse (unità/s). */
       orbitSpeed: 0.42,
@@ -134,7 +134,7 @@ export const BALANCE = {
     },
     anomalo: {
       /** Fase 1: colpi che servono a frantumare la corazza (un critico ne vale critMult). */
-      armorHitsBase: 12,
+      armorHitsBase: 18,
       armorHitsPerWave: 1,
       /** Fase 2: vita del nucleo rispetto a hpBase + hpPerWave × ondata, e raggio rispetto al meteorite. */
       coreHpFrac: 0.7,
@@ -142,7 +142,7 @@ export const BALANCE = {
       /** Quote del nucleo: appena fuori dall'orbita lunare (+coreNear) fino a coreFar; cambia quota ogni coreHopEvery s. */
       coreNear: 0.45,
       coreFar: 6.0,
-      coreHopEvery: 3.2,
+      coreHopEvery: 4.0,
       /** Velocità angolare (rad/s) e molla del rimbalzo radiale (rigidità, smorzamento). */
       coreSpin: 0.55,
       coreStiff: 9,
@@ -152,7 +152,7 @@ export const BALANCE = {
       /** Preavviso (raggio sottile), arco spazzato, velocità, mezza larghezza utile sul cannone. */
       warn: 0.8,
       arcDeg: 80,
-      sweepDegPerS: 22,
+      sweepDegPerS: 18,
       halfWidthDeg: 7,
       /** Danno alla Terra ogni tick secondi con il cannone dentro il raggio. */
       dmg: 3,
