@@ -1734,3 +1734,8 @@
   line-height: 2.75rem;
   font-size: 1.2rem;
 }
+
+/* v24: nome del boss e stato del punto debole sopra la barra. */
+.et-bossname { display: block; width: 100%; font-size: 0.68rem; letter-spacing: 0.04em; text-align: center; color: var(--color-fg); opacity: 0.85; margin-bottom: 0.15rem; }
+.et-bossname.is-charge { color: #ff8aa2; }
+.et-bossname.is-open { color: #ffe14d; opacity: 1; font-weight: 700; }

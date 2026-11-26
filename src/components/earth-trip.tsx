@@ -777,6 +777,9 @@ type HudState = {
   bossHp?: number;
   bossMax?: number;
   bossShielded?: boolean;
+  bossName?: string | null;
+  bossPhase?: number;
+  bossWeak?: "open" | "charge" | "closed" | null;
   shop?: boolean;
   shopKind?: "wave" | "freeze" | null;
   guide?: boolean;
@@ -979,6 +982,13 @@ function DefenseHud({ state, api, onQuit }: { state: HudState; api: { current: E
             <IconLunar />
           </button>
         </div>
+        {bossMax > 0 && state.bossName ? (
+          <span className={`et-bossname${state.bossWeak === "open" ? " is-open" : state.bossWeak === "charge" ? " is-charge" : ""}`} aria-live="polite">
+            {state.bossName}
+            {state.bossName === "Asteroide Anomalo" ? (state.bossPhase === 2 ? " · nucleo instabile" : " · corazza") : ""}
+            {state.bossWeak === "open" ? " · punto debole scoperto!" : state.bossWeak === "charge" ? " · in carica…" : ""}
+          </span>
+        ) : null}
         {bossMax > 0 ? (
           <span className={state.bossShielded ? "et-bossbar is-shielded" : "et-bossbar"} aria-label="Integrità del boss">
             <i style={{ width: `${Math.max(0, Math.min(100, ((state.bossHp ?? 0) / bossMax) * 100))}%` }} />

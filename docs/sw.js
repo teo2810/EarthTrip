@@ -1,11 +1,11 @@
 // Service worker di EarthTrip. La versione viene aggiornata da scripts/build-docs.mjs.
-const CACHE = "earthtrip-v23";
+const CACHE = "earthtrip-v24";
 // Texture, GeoJSON e TLE dai CDN: cache separata che sopravvive ai rilasci.
 const ASSETS_CACHE = "earth-assets-v1";
 const SHELL = [
   "./",
   "./index.html",
-  "./app-v23.js",
+  "./app-v24.js",
   "./style.css",
   "./favicon.svg",
   "./manifest.json",

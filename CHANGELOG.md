@@ -1,5 +1,14 @@
 # Changelog
 
+## v24 · 2026-11-26
+
+- Nuovo sistema dei boss al posto del vecchio, alternati per ondata: **Satellite Madre** (dispari) e **Asteroide Anomalo** (pari).
+- Satellite Madre: orbita ellittica fissa, adattata allo schermo e fuori dall'orbita lunare. Ha 3 scudi direzionali che ruotano (uno frontale, due laterali): i colpi che li prendono rimbalzano. Durante la carica dell'attacco pesante il frontale si apre e lascia scoperto il nucleo; a fine carica parte una raffica.
+- Asteroide Anomalo: nella fase 1 è una corazza che si frantuma dopo N colpi. Nella fase 2 esce un nucleo instabile che salta tra quote vicine e lontane con un rimbalzo, e lo zoom lo regola il giocatore con lo slider.
+- Attacchi comuni: un laser che spazza lentamente un arco e danneggia la Terra se il cannone resta nel raggio, e una pioggia di asteroidi piccoli dai bordi, fatta con i detriti normali.
+- Punto debole dinamico: si scopre ogni pochi secondi ed è annunciato da un suono di carica sintetizzato con WebAudio. Lì il colpo fa critico ×3 (scritta «CRITICO ×3» e lampo); altrove fa danno ridotto (scintilla) o rimbalza. Con la riduzione del movimento la scritta resta ferma e non ci sono lampi né scosse.
+- Restano le regole di prima: niente perforazione, il boss in ingresso blocca i colpi senza danno, la rotazione della Terra viene ripristinata all'uscita. Tutti i numeri stanno in `BALANCE.boss` e sono provvisori.
+
 ## v23 · 2026-11-26
 
 - Capitali fuori posto (Roma in mare): conversione lat/lon, texture, confini e Leaflet erano già allineati; era l'etichetta. Tutta l'etichetta era centrata sopra il punto (`translate(-50%, -120%)`) e il pallino, a sinistra del nome, finiva mezza etichetta più a ovest e una riga più su (25–50 px, 0,6–1,3°). Ora il pallino è un elemento ancorato al punto esatto e il nome sta alla sua destra.

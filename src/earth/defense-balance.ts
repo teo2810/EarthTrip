@@ -92,7 +92,7 @@ export const BALANCE = {
     pickupTapRadius: 0.55,
   },
 
-  /** Teletrasporto del boss dopo l'impatto sulla Terra. */
+  /** Boss: teletrasporto dopo l'impatto sulla Terra, raggio, colpi e (v24) Satellite Madre e Asteroide Anomalo. */
   boss: {
     teleportTelegraph: 1.0,
     /** Scarto casuale della destinazione rispetto al lato opposto, in gradi. */
@@ -104,6 +104,72 @@ export const BALANCE = {
     /** Dall'ondata fireCapWave in poi i colpi del boss non crescono più (numero e cadenza). */
     fireCapWave: 10,
     shotsCap: 4,
+
+    /* ── v24: sistema dei boss (valori provvisori, da tarare con Math_Calc) ── */
+    /** Ondate dispari: Satellite Madre; pari: Asteroide Anomalo. */
+    hpBase: 22,
+    hpPerWave: 8,
+    /** Danno nel punto debole scoperto. */
+    critMult: 3,
+    /** Danno fuori dal punto debole (scafo o nucleo coperto). */
+    offMult: 0.35,
+    /** Ciclo del punto debole: chiuso weakEvery s, suono di carica weakWarn s prima, scoperto weakOpen s. */
+    weakEvery: 5.5,
+    weakWarn: 0.7,
+    weakOpen: 1.8,
+    /** Raggio del punto debole rispetto al raggio del boss. */
+    weakFrac: 0.6,
+    /** Secondi tra due attacchi comuni (si alternano laser e pioggia). */
+    attackEvery: 6.5,
+    madre: {
+      /** Velocità lungo l'ellisse (unità/s). */
+      orbitSpeed: 0.42,
+      /** Ampiezza di ogni scudo, angolo dei due laterali rispetto al frontale, oscillazione e velocità del gruppo. */
+      shieldArcDeg: 56,
+      lateralDeg: 110,
+      shieldSwingDeg: 60,
+      shieldSpin: 0.9,
+      /** Colpi dell'attacco pesante a fine carica. */
+      heavyShots: 5,
+    },
+    anomalo: {
+      /** Fase 1: colpi che servono a frantumare la corazza (un critico ne vale critMult). */
+      armorHitsBase: 12,
+      armorHitsPerWave: 1,
+      /** Fase 2: vita del nucleo rispetto a hpBase + hpPerWave × ondata, e raggio rispetto al meteorite. */
+      coreHpFrac: 0.7,
+      coreScale: 0.55,
+      /** Quote del nucleo: appena fuori dall'orbita lunare (+coreNear) fino a coreFar; cambia quota ogni coreHopEvery s. */
+      coreNear: 0.45,
+      coreFar: 6.0,
+      coreHopEvery: 3.2,
+      /** Velocità angolare (rad/s) e molla del rimbalzo radiale (rigidità, smorzamento). */
+      coreSpin: 0.55,
+      coreStiff: 9,
+      coreDamp: 2.2,
+    },
+    laser: {
+      /** Preavviso (raggio sottile), arco spazzato, velocità, mezza larghezza utile sul cannone. */
+      warn: 0.8,
+      arcDeg: 80,
+      sweepDegPerS: 22,
+      halfWidthDeg: 7,
+      /** Danno alla Terra ogni tick secondi con il cannone dentro il raggio. */
+      dmg: 3,
+      tick: 0.35,
+      /** Il raggio parte a leadDeg dal cannone e gli passa sopra. */
+      leadDeg: 35,
+    },
+    rain: {
+      /** Asteroidi piccoli: base + perWave × ondata, al massimo max, in span s. */
+      countBase: 5,
+      countPerWave: 0.5,
+      countMax: 11,
+      span: 1.6,
+      radius: 0.1,
+      hpFrac: 0.5,
+      speedMult: 1.25,
+    },
   },
 
   /** Upgrade dei missili. */

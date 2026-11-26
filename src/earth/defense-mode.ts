@@ -98,6 +98,34 @@ type Enemy = {
   /** Secondi al teletrasporto del boss (0 = nessuno in corso). */
   tele: number;
   teleAngle: number;
+  /** v24: stato del boss (Satellite Madre o Asteroide Anomalo); assente sui nemici normali e sui manichini dei test. */
+  bt?: BossRT;
+  /** Asteroide piccolo della pioggia del boss. */
+  small?: boolean;
+};
+type BossKind = "madre" | "anomalo";
+type BossRT = {
+  kind: BossKind;
+  phase: 1 | 2;
+  /** Gruppo figlio dello scafo che non ruota con lui: scudi e nucleo. */
+  rig: THREE.Group;
+  shields: THREE.Mesh[];
+  core: THREE.Mesh;
+  /** Ciclo del punto debole. */
+  weakT: number;
+  exposed: boolean;
+  warned: boolean;
+  attackT: number;
+  nextAtk: "laser" | "rain";
+  swing: number;
+  flash: number;
+  /** Fase 2 dell'Anomalo: quota d'orbita voluta, velocità radiale, tempo al prossimo salto. */
+  goalR: number;
+  rVel: number;
+  hopT: number;
+  last: { kind: "crit" | "hull" | "armor" | "ricochet"; dmg: number; base: number } | null;
+  /** Test: boss fermo, scudi fermi, ciclo e attacchi in pausa. */
+  hold: boolean;
 };
 type Coin = { mesh: THREE.Group; arc: THREE.Mesh; life: number; value: number; q: number };
 type ShotKind = "bolt" | "bomb" | "msingle" | "rada" | "grappolo" | "ricerca" | "termobarica";
@@ -119,12 +147,15 @@ type Shot = {
   direct: Enemy | null;
   /** Posizione al frame precedente, per il test di collisione sul segmento percorso. */
   prev: THREE.Vector3;
+  /** Rimbalzato su uno scudo: vola via senza più colpire nessuno. */
+  dud?: boolean;
 };
 
 let enemySeq = 1;
 
 /** Raggio visibile: anelli del boss (×1,9) e della nave tesoro (×1,5) compresi. */
 function visualRadius(e: Enemy) {
+  if (e.bt) return e.bt.kind === "madre" ? e.radius * 1.5 + 0.03 : e.radius * 1.05 + 0.02;
   if (e.boss) return e.radius * 1.9 + 0.018;
   if (e.treasure) return e.radius * 1.5 + 0.025;
   return e.radius;
@@ -774,6 +805,9 @@ export function createDefenseMode(hooks: DefenseHooks) {
       bossHp: bossE ? Math.max(0, bossE.hp) : 0,
       bossMax: bossE ? bossE.maxHp : 0,
       bossShielded: Boolean(bossE && bossE.entering > 0),
+      bossName: bossE?.bt ? (bossE.bt.kind === "madre" ? "Satellite Madre" : "Asteroide Anomalo") : null,
+      bossPhase: bossE?.bt ? bossE.bt.phase : 0,
+      bossWeak: bossE?.bt ? (bossE.bt.exposed ? "open" : bossE.bt.warned ? "charge" : "closed") : null,
       placing: place?.kind ?? null,
       placeMsg,
       paused,
@@ -1168,39 +1202,83 @@ export function createDefenseMode(hooks: DefenseHooks) {
   function bossZoomMin() {
     const b = enemies.find((e) => e.boss);
     if (!b) return 0;
+    // Nucleo dell'Anomalo: cambia quota apposta, lo zoom lo regola il giocatore con lo slider.
+    if (b.bt?.kind === "anomalo" && b.bt.phase === 2) return 0;
     const need = MOON_ORBIT + b.radius * 2.9 + 0.6;
     return THREE.MathUtils.clamp(Math.log(need / VIEW_NEAR) / Math.log(VIEW_FAR / VIEW_NEAR), 0, 1);
   }
 
-  function spawnEnemy(boss = false, at?: number) {
+  /** v24: i due boss si alternano, ondate dispari Satellite Madre, pari Asteroide Anomalo. */
+  function bossKindFor(wave: number): BossKind {
+    return wave % 2 === 1 ? "madre" : "anomalo";
+  }
+
+  /** Scafo, scudi e nucleo del boss. Il rig è figlio dello scafo ma non ne segue la rotazione. */
+  function makeBoss(kind: BossKind, radius: number) {
+    const BB = BALANCE.boss;
+    const mesh = kind === "madre"
+      ? new THREE.Mesh(
+          new THREE.IcosahedronGeometry(radius, 1),
+          new THREE.MeshStandardMaterial({ color: 0x9fc4d6, emissive: 0x1d4a5c, emissiveIntensity: 0.9, metalness: 0.5, roughness: 0.35, flatShading: true }),
+        )
+      : new THREE.Mesh(
+          new THREE.DodecahedronGeometry(radius, 0),
+          new THREE.MeshStandardMaterial({ color: 0x7b5e45, emissive: 0x3a1a08, emissiveIntensity: 0.9, metalness: 0.1, roughness: 0.9, flatShading: true }),
+        );
+    const rig = new THREE.Group();
+    const shields: THREE.Mesh[] = [];
+    if (kind === "madre") {
+      const arc = (BB.madre.shieldArcDeg * Math.PI) / 180;
+      for (let k = 0; k < 3; k += 1) {
+        const sh = new THREE.Mesh(
+          new THREE.TorusGeometry(radius * 1.45, 0.06, 6, 14, arc),
+          new THREE.MeshBasicMaterial({ color: k === 0 ? 0x7fe3ff : 0x5fb8e6, transparent: true, opacity: 0.92, depthTest: false }),
+        );
+        sh.renderOrder = 4;
+        shields.push(sh);
+        rig.add(sh);
+      }
+      const belt = new THREE.Mesh(
+        new THREE.TorusGeometry(radius * 1.12, 0.02, 6, 32),
+        new THREE.MeshBasicMaterial({ color: 0xd8f3ff, transparent: true, opacity: 0.55 }),
+      );
+      rig.add(belt);
+    }
+    const core = new THREE.Mesh(
+      new THREE.SphereGeometry(radius * BB.weakFrac * 0.55, 16, 12),
+      new THREE.MeshBasicMaterial({ color: 0xff3b6b, transparent: true, opacity: 0.25, depthTest: false }),
+    );
+    core.renderOrder = 5;
+    core.position.z = radius * 1.05;
+    rig.add(core);
+    mesh.add(rig);
+    const bt: BossRT = {
+      kind, phase: 1, rig, shields, core, weakT: 0, exposed: false, warned: false,
+      attackT: BB.attackEvery * 0.5, nextAtk: Math.random() < 0.5 ? "laser" : "rain", swing: 0, flash: 0,
+      goalR: 0, rVel: 0, hopT: 0, last: null, hold: false,
+    };
+    const base = BB.hpBase + state.wave * BB.hpPerWave;
+    const hp = kind === "madre" ? base : BB.anomalo.armorHitsBase + state.wave * BB.anomalo.armorHitsPerWave;
+    return { mesh, bt, hp };
+  }
+
+  function spawnEnemy(boss = false, at?: number, small = false) {
     const angle = at ?? Math.random() * Math.PI * 2;
     const bb = BALANCE.boss;
-    const radius0 = boss ? Math.min(bb.radiusMax, bb.radiusBase + state.wave * bb.radiusPerWave) : 0.16;
-    const dist = edgeDist(angle) + (boss ? radius0 * 2 + 0.35 : 0.45 + Math.random() * 0.35);
+    const rain = bb.rain;
+    const radius0 = boss ? Math.min(bb.radiusMax, bb.radiusBase + state.wave * bb.radiusPerWave) : small ? rain.radius : 0.16;
+    const dist = edgeDist(angle) + (boss ? radius0 * 2 + 0.35 : small ? 0.25 + Math.random() * 0.25 : 0.45 + Math.random() * 0.35);
     const radius = radius0;
-    const hp = boss ? 22 + state.wave * 8 : 1.6 + state.wave * 0.45;
-    const mesh = boss
-      ? new THREE.Mesh(
-          new THREE.IcosahedronGeometry(radius, 0),
-          new THREE.MeshStandardMaterial({ color: 0xff8a1e, emissive: 0x7a2c00, emissiveIntensity: 0.9, metalness: 0.25, roughness: 0.38 }),
-        )
-      : new THREE.Mesh(GEO.trash, trashMat);
+    const made = boss ? makeBoss(bossKindFor(state.wave), radius) : null;
+    const hp = made ? made.hp : (1.6 + state.wave * 0.45) * (small ? rain.hpFrac : 1);
+    const mesh = made ? made.mesh : new THREE.Mesh(GEO.trash, trashMat);
+    if (small) mesh.scale.setScalar(radius / 0.16);
     mesh.position.set(Math.cos(angle) * dist, Math.sin(angle) * dist, boss ? 0 : (Math.random() - 0.5) * 0.15);
-    if (boss) {
-      const halo = new THREE.Mesh(
-        new THREE.TorusGeometry(radius * 1.55, 0.04, 8, 28),
-        new THREE.MeshBasicMaterial({ color: 0xffb15a, transparent: true, opacity: 0.95 }),
-      );
-      halo.rotation.x = Math.PI / 2;
-      const ring = new THREE.Mesh(
-        new THREE.TorusGeometry(radius * 1.9, 0.018, 6, 32),
-        new THREE.MeshBasicMaterial({ color: 0xfff1c2, transparent: true, opacity: 0.8 }),
-      );
-      mesh.add(halo, ring);
-    }
     hooks.getScene().add(mesh);
-    const speed = boss ? 0.34 + state.wave * 0.025 : 0.46 + state.wave * 0.04;
+    const speed = boss ? 0.34 + state.wave * 0.025 : (0.46 + state.wave * 0.04) * (small ? rain.speedMult : 1);
     enemies.push({
+      bt: made?.bt,
+      small,
       id: enemySeq++,
       mesh,
       speed,
@@ -1220,7 +1298,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
       tele: 0,
       teleAngle: 0,
     });
-    if (boss) burst(mesh.position, 0xffb15a, 18);
+    if (boss) burst(mesh.position, made?.bt.kind === "madre" ? 0x9fe6ff : 0xffb15a, 18);
   }
 
   function spawnDrop(pos: THREE.Vector3, kind: DropKind = "shield") {
@@ -1383,6 +1461,432 @@ export function createDefenseMode(hooks: DefenseHooks) {
     (teleGhost.material as THREE.MeshBasicMaterial).opacity = 0.35 + (1 - e.tele / BALANCE.boss.teleportTelegraph) * 0.6;
   }
 
+  /* ───────────── v24: sistema dei boss ─────────────
+   * Un solo sistema per Satellite Madre e Asteroide Anomalo: stesso ciclo del punto debole (suono di carica,
+   * nucleo scoperto, critico ×critMult), stessi attacchi comuni (laser che spazza, pioggia di asteroidi piccoli
+   * dai bordi, fatta con i detriti normali). Cambiano solo il movimento e la difesa: scudi che fanno rimbalzare
+   * i colpi (Madre) oppure corazza da frantumare e nucleo che cambia quota (Anomalo). */
+  const rad = (deg: number) => (deg * Math.PI) / 180;
+  let laser: { mesh: THREE.Mesh; ang: number; dir: number; swept: number; warn: number; tickT: number; src: Enemy } | null = null;
+  let rainLeft = 0;
+  let rainT = 0;
+  let rainEvery = 0.2;
+  const bossStats = { ricochets: 0, crits: 0, shatters: 0, laserHits: 0, lasers: 0, rains: 0, rainSpawned: 0 };
+  const sounds = { carica: 0, rimbalzo: 0, critico: 0, laser: 0 };
+  type Fx = { obj: THREE.Object3D; life: number; max: number; rise: number };
+  const fx: Fx[] = [];
+  let critTex: THREE.CanvasTexture | null = null;
+
+  /** Audio sintetizzato con WebAudio, creato al primo tocco (i browser lo richiedono). */
+  let actx: AudioContext | null = null;
+  function audio() {
+    if (typeof window === "undefined") return null;
+    if (!actx) {
+      const C = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!C) return null;
+      try {
+        actx = new C();
+      } catch {
+        return null;
+      }
+    }
+    if (actx.state === "suspended") void actx.resume().catch(() => {});
+    return actx;
+  }
+
+  function sfx(kind: keyof typeof sounds) {
+    sounds[kind] += 1;
+    const ctx = actx;
+    if (!ctx || ctx.state !== "running" || document.hidden) return;
+    const t0 = ctx.currentTime;
+    const out = ctx.createGain();
+    out.connect(ctx.destination);
+    const osc = ctx.createOscillator();
+    osc.connect(out);
+    let dur = 0.1;
+    const g = out.gain;
+    g.setValueAtTime(0.0001, t0);
+    if (kind === "carica") {
+      // Carica: dente di sega che sale con un tremolo veloce, poi un "ping" all'apertura.
+      dur = BALANCE.boss.weakWarn;
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(140, t0);
+      osc.frequency.exponentialRampToValueAtTime(900, t0 + dur);
+      const lfo = ctx.createOscillator();
+      const lg = ctx.createGain();
+      lfo.frequency.value = 16;
+      lg.gain.value = 45;
+      lfo.connect(lg).connect(osc.frequency);
+      lfo.start(t0);
+      lfo.stop(t0 + dur + 0.05);
+      g.linearRampToValueAtTime(0.05, t0 + dur);
+      g.exponentialRampToValueAtTime(0.0001, t0 + dur + 0.05);
+      const ping = ctx.createOscillator();
+      const pg = ctx.createGain();
+      ping.type = "triangle";
+      ping.frequency.value = 1320;
+      pg.gain.setValueAtTime(0.0001, t0 + dur);
+      pg.gain.exponentialRampToValueAtTime(0.06, t0 + dur + 0.01);
+      pg.gain.exponentialRampToValueAtTime(0.0001, t0 + dur + 0.3);
+      ping.connect(pg).connect(ctx.destination);
+      ping.start(t0 + dur);
+      ping.stop(t0 + dur + 0.32);
+    } else {
+      const cfg = {
+        rimbalzo: { type: "triangle", f0: 2400, f1: 1500, d: 0.08, v: 0.035 },
+        critico: { type: "square", f0: 220, f1: 70, d: 0.2, v: 0.05 },
+        laser: { type: "sawtooth", f0: 95, f1: 55, d: 0.6, v: 0.03 },
+      }[kind] as { type: OscillatorType; f0: number; f1: number; d: number; v: number };
+      dur = cfg.d;
+      osc.type = cfg.type;
+      osc.frequency.setValueAtTime(cfg.f0, t0);
+      osc.frequency.exponentialRampToValueAtTime(cfg.f1, t0 + dur);
+      g.exponentialRampToValueAtTime(cfg.v, t0 + 0.012);
+      g.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    }
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.06);
+  }
+
+  /** Morto davvero? La corazza dell'Anomalo a zero non lo uccide: si frantuma e parte la fase 2. */
+  function isDead(e: Enemy) {
+    if (e.hp > 0) return false;
+    if (e.bt && e.bt.kind === "anomalo" && e.bt.phase === 1) {
+      shatter(e);
+      return false;
+    }
+    return true;
+  }
+
+  function shatter(e: Enemy) {
+    const b = e.bt!;
+    const A = BALANCE.boss.anomalo;
+    const BB = BALANCE.boss;
+    b.phase = 2;
+    bossStats.shatters += 1;
+    burst(e.mesh.position, 0xb08560, 30);
+    burst(e.mesh.position, 0xc77dff, 16);
+    sfx("critico");
+    hitShake = reduceMotion ? 0 : Math.min(0.5, hitShake + 0.3);
+    e.radius *= A.coreScale;
+    e.mesh.geometry.dispose();
+    e.mesh.geometry = new THREE.IcosahedronGeometry(e.radius, 1);
+    const mat = e.mesh.material as THREE.MeshStandardMaterial;
+    mat.color.setHex(0xc77dff);
+    mat.emissive.setHex(0x5a1a9a);
+    mat.roughness = 0.4;
+    b.core.scale.setScalar(A.coreScale);
+    b.core.position.z = e.radius * 1.05;
+    e.maxHp = (BB.hpBase + state.wave * BB.hpPerWave) * A.coreHpFrac;
+    e.hp = e.maxHp;
+    b.exposed = false;
+    b.warned = false;
+    b.weakT = 0;
+    b.hopT = 0;
+    b.rVel = 0;
+    b.goalR = e.mesh.position.length();
+  }
+
+  /** Angoli dei tre scudi del Madre: il frontale guarda la Terra e oscilla; durante la carica si apre. */
+  function shieldAngles(e: Enemy) {
+    const b = e.bt!;
+    const m = BALANCE.boss.madre;
+    const toEarth = Math.atan2(-e.mesh.position.y, -e.mesh.position.x);
+    const base = toEarth + Math.sin(b.swing * m.shieldSpin) * rad(m.shieldSwingDeg);
+    const lat = rad(m.lateralDeg);
+    return [
+      { a: base, on: !b.exposed },
+      { a: base + lat, on: true },
+      { a: base - lat, on: true },
+    ];
+  }
+
+  /** Colpo diretto su un boss. Vero = rimbalzato su uno scudo (il proiettile è già stato deviato). */
+  function bossImpact(e: Enemy, p: Shot, at: THREE.Vector3, dist: number) {
+    const b = e.bt!;
+    const BB = BALANCE.boss;
+    if (b.kind === "madre") {
+      // Lo scudo che conta è quello rivolto verso la provenienza del colpo.
+      const phi = Math.atan2(-p.vel.y, -p.vel.x);
+      const half = rad(BB.madre.shieldArcDeg) / 2;
+      if (shieldAngles(e).some((sh) => sh.on && Math.abs(angDelta(phi, sh.a)) <= half)) {
+        const n = tmpA.set(Math.cos(phi), Math.sin(phi), 0);
+        const vn = p.vel.dot(n);
+        p.vel.addScaledVector(n, -2 * vn).multiplyScalar(0.75);
+        p.mesh.position.copy(e.mesh.position).addScaledVector(n, visualRadius(e) + 0.06);
+        p.mesh.position.z = 0.05;
+        p.prev.copy(p.mesh.position);
+        p.dud = true;
+        p.damage = 0;
+        p.blast = 0;
+        p.blastDmg = 0;
+        p.kind = "bolt";
+        p.range = p.traveled + 1.4;
+        p.life = Math.min(p.life, 0.5);
+        p.hits.add(e.id);
+        burst(p.mesh.position, 0xbff4ff, 6);
+        b.last = { kind: "ricochet", dmg: 0, base: 0 };
+        bossStats.ricochets += 1;
+        sfx("rimbalzo");
+        return true;
+      }
+    }
+    if (p.damage <= 0) return false;
+    // Mira: distanza dal centro della retta del colpo (il punto d'impatto è sul bordo, non sul nucleo).
+    const vl = Math.hypot(p.vel.x, p.vel.y) || 1;
+    const miss = Math.min(dist, Math.abs(p.vel.x * (e.mesh.position.y - at.y) - p.vel.y * (e.mesh.position.x - at.x)) / vl);
+    const crit = b.exposed && miss <= e.radius * BB.weakFrac + shotPad(p.kind) * 0.5;
+    bossDamage(e, p.damage, crit, at);
+    return false;
+  }
+
+  /** Danno al boss: critico nel punto debole scoperto, ridotto altrove; la corazza dell'Anomalo conta i colpi. */
+  function bossDamage(e: Enemy, base: number, crit: boolean, at: THREE.Vector3, area = false) {
+    const b = e.bt!;
+    const BB = BALANCE.boss;
+    if (base <= 0) return;
+    const armor = b.kind === "anomalo" && b.phase === 1;
+    const d = armor ? (crit ? BB.critMult : 1) : base * (crit ? BB.critMult : area && b.exposed ? 1 : BB.offMult);
+    e.hp -= d;
+    b.last = { kind: crit ? "crit" : armor ? "armor" : "hull", dmg: d, base };
+    if (crit) critFx(at);
+    else burst(at, 0x9aa4b2, 3);
+  }
+
+  /** Feedback del critico: scritta che sale (ferma con riduzione del movimento), lampo dello scafo, suono. */
+  function critFx(at: THREE.Vector3) {
+    bossStats.crits += 1;
+    sfx("critico");
+    if (!critTex) {
+      const c = document.createElement("canvas");
+      c.width = 320;
+      c.height = 96;
+      const g = c.getContext("2d");
+      if (g) {
+        g.font = "900 54px system-ui, sans-serif";
+        g.textAlign = "center";
+        g.textBaseline = "middle";
+        g.lineWidth = 9;
+        g.strokeStyle = "#3a0010";
+        const txt = `CRITICO ×${BALANCE.boss.critMult}`;
+        g.strokeText(txt, 160, 48);
+        g.fillStyle = "#ffe14d";
+        g.fillText(txt, 160, 48);
+      }
+      critTex = new THREE.CanvasTexture(c);
+    }
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: critTex, transparent: true, depthTest: false }));
+    sp.scale.set(1.35, 0.4, 1);
+    sp.position.set(at.x, at.y + 0.35, 0.3);
+    sp.renderOrder = 9;
+    hooks.getScene().add(sp);
+    fx.push({ obj: sp, life: 0.9, max: 0.9, rise: reduceMotion ? 0 : 0.6 });
+    burst(at, 0xffe14d, reduceMotion ? 6 : 14);
+    const boss = enemies.find((x) => x.bt);
+    if (boss?.bt && !reduceMotion) boss.bt.flash = 0.12;
+  }
+
+  function tickFx(dt: number) {
+    for (let i = fx.length - 1; i >= 0; i -= 1) {
+      const f = fx[i];
+      f.life -= dt;
+      f.obj.position.y += f.rise * dt;
+      const m = (f.obj as THREE.Sprite).material as THREE.SpriteMaterial;
+      m.opacity = Math.max(0, Math.min(1, (f.life / f.max) * 1.6));
+      if (f.life <= 0) {
+        hooks.getScene().remove(f.obj);
+        m.dispose();
+        fx.splice(i, 1);
+      }
+    }
+  }
+
+  function clearFx() {
+    for (const f of fx) {
+      hooks.getScene().remove(f.obj);
+      ((f.obj as THREE.Sprite).material as THREE.Material).dispose();
+    }
+    fx.length = 0;
+  }
+
+  /** Orbita del Madre (ellisse fissa adattata allo schermo, sempre fuori dalla Luna) e del nucleo dell'Anomalo. */
+  function moveBoss(e: Enemy, dt: number) {
+    const b = e.bt!;
+    const pos = e.mesh.position;
+    const v = viewHalf();
+    if (b.kind === "madre") {
+      const low = MOON_ORBIT + visualRadius(e) + 0.35;
+      const ax = Math.max(low, v.w - visualRadius(e) - 0.25);
+      const ay = Math.max(low, v.h - visualRadius(e) - 0.25);
+      const t = Math.atan2(pos.y / ay, pos.x / ax) + (e.strafe * BALANCE.boss.madre.orbitSpeed * dt * 2) / (ax + ay);
+      tmpA.set(Math.cos(t) * ax, Math.sin(t) * ay, 0);
+      pos.lerp(tmpA, 1 - Math.exp(-dt * 2.5));
+      return;
+    }
+    // Nucleo instabile: salta tra quota vicina, media e lontana con un rimbalzo a molla, girando veloce.
+    const A = BALANCE.boss.anomalo;
+    const near = MOON_ORBIT + e.radius + A.coreNear;
+    const far = Math.max(near + 0.5, A.coreFar);
+    b.hopT -= dt;
+    if (b.hopT <= 0) {
+      b.hopT = A.coreHopEvery;
+      const opts = [near, (near + far) / 2, far].filter((r) => Math.abs(r - b.goalR) > 0.3);
+      b.goalR = opts[Math.floor(Math.random() * opts.length)] ?? far;
+    }
+    let r = Math.max(0.001, pos.length());
+    b.rVel += (b.goalR - r) * A.coreStiff * dt;
+    b.rVel *= Math.exp(-A.coreDamp * dt);
+    r += b.rVel * dt;
+    const floor = MOON_ORBIT + e.radius + 0.15;
+    if (r < floor) {
+      r = floor;
+      b.rVel = Math.abs(b.rVel);
+    }
+    const th = Math.atan2(pos.y, pos.x) + e.strafe * A.coreSpin * dt;
+    pos.set(Math.cos(th) * r, Math.sin(th) * r, 0);
+  }
+
+  /** Ciclo del punto debole, scudi, attacchi comuni. */
+  function tickBosses(dt: number) {
+    const BB = BALANCE.boss;
+    for (const e of enemies) {
+      const b = e.bt;
+      if (!b) continue;
+      // Rig fermo rispetto allo schermo anche se lo scafo gira.
+      b.rig.rotation.z = -e.mesh.rotation.z;
+      const ready = e.entering <= 0 && e.tele <= 0;
+      if (ready && !b.hold) {
+        b.swing += dt;
+        b.weakT += dt;
+        if (!b.exposed) {
+          if (!b.warned && b.weakT >= BB.weakEvery - BB.weakWarn) {
+            b.warned = true;
+            sfx("carica");
+          }
+          if (b.weakT >= BB.weakEvery) {
+            b.exposed = true;
+            b.weakT = 0;
+          }
+        } else if (b.weakT >= BB.weakOpen) {
+          b.exposed = false;
+          b.warned = false;
+          b.weakT = 0;
+          // Attacco pesante del Madre a fine carica.
+          if (b.kind === "madre") for (let k = 0; k < BB.madre.heavyShots; k += 1) spawnHostile(e.mesh.position, visualRadius(e));
+        }
+        b.attackT -= dt;
+        if (b.attackT <= 0 && !laser && rainLeft <= 0) {
+          b.attackT = BB.attackEvery;
+          if (b.nextAtk === "laser") startLaser(e);
+          else startRain();
+          b.nextAtk = b.nextAtk === "laser" ? "rain" : "laser";
+        }
+      }
+      // Scudi.
+      const arc = rad(BB.madre.shieldArcDeg);
+      if (b.kind === "madre") {
+        const sa = shieldAngles(e);
+        b.shields.forEach((sh, k) => {
+          sh.rotation.z = sa[k].a - arc / 2;
+          (sh.material as THREE.MeshBasicMaterial).opacity = sa[k].on ? 0.92 : 0.12;
+        });
+      }
+      // Nucleo: spento, poi pulsa durante la carica, acceso quando è scoperto.
+      const cm = b.core.material as THREE.MeshBasicMaterial;
+      const pulse = reduceMotion ? 0.5 : 0.5 + 0.5 * Math.sin(performance.now() * 0.03);
+      cm.opacity = b.exposed ? 1 : b.warned ? 0.35 + 0.5 * pulse : 0.22;
+      cm.color.setHex(b.exposed ? 0xfff066 : 0xff3b6b);
+      const k = (b.phase === 2 ? BALANCE.boss.anomalo.coreScale : 1) * (b.exposed ? 1.35 : 1);
+      b.core.scale.setScalar(k);
+      const mat = e.mesh.material as THREE.MeshStandardMaterial;
+      if (b.flash > 0) {
+        b.flash = Math.max(0, b.flash - dt);
+        mat.emissiveIntensity = 2.4;
+      }
+    }
+    tickLaser(dt);
+    if (phase !== "play") return;
+    tickRain(dt);
+  }
+
+  function startLaser(src: Enemy) {
+    const L = BALANCE.boss.laser;
+    const dir = Math.random() < 0.5 ? 1 : -1;
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshBasicMaterial({ color: 0xff3048, transparent: true, opacity: 0.3, depthTest: false, blending: THREE.AdditiveBlending }),
+    );
+    mesh.renderOrder = 7;
+    hooks.getScene().add(mesh);
+    laser = { mesh, ang: aimAngle - dir * rad(L.leadDeg), dir, swept: 0, warn: L.warn, tickT: 0, src };
+    bossStats.lasers += 1;
+    sfx("laser");
+  }
+
+  function clearLaser() {
+    if (!laser) return;
+    disposeObject(laser.mesh);
+    laser = null;
+  }
+
+  /** Il raggio va dal boss al bordo della Terra e spazza l'arco: il cannone dentro il raggio fa danno alla Terra. */
+  function tickLaser(dt: number) {
+    if (!laser) return;
+    const L = BALANCE.boss.laser;
+    if (enemies.indexOf(laser.src) < 0) {
+      clearLaser();
+      return;
+    }
+    const z = laser;
+    const ex = Math.cos(z.ang) * RIM;
+    const ey = Math.sin(z.ang) * RIM;
+    if (z.warn > 0) z.warn = Math.max(0, z.warn - dt);
+    else {
+      const step = rad(L.sweepDegPerS) * dt;
+      z.ang += z.dir * step;
+      z.swept += step;
+      if (z.swept >= rad(L.arcDeg)) {
+        clearLaser();
+        return;
+      }
+      if (Math.abs(angDelta(aimAngle, z.ang)) <= rad(L.halfWidthDeg)) {
+        z.tickT -= dt;
+        if (z.tickT <= 0) {
+          z.tickT = L.tick;
+          bossStats.laserHits += 1;
+          hurtEarth(L.dmg, new THREE.Vector3(ex, ey, 0));
+          if (phase !== "play") return;
+        }
+      } else z.tickT = 0;
+    }
+    const s = z.src.mesh.position;
+    const len = Math.hypot(ex - s.x, ey - s.y);
+    z.mesh.position.set((s.x + ex) / 2, (s.y + ey) / 2, 0.08);
+    z.mesh.rotation.z = Math.atan2(ey - s.y, ex - s.x);
+    const flicker = reduceMotion ? 1 : 0.85 + 0.15 * Math.sin(performance.now() * 0.04);
+    z.mesh.scale.set(len, z.warn > 0 ? 0.03 : 0.12 * flicker, 1);
+    (z.mesh.material as THREE.MeshBasicMaterial).opacity = z.warn > 0 ? 0.35 : 0.85;
+  }
+
+  function startRain() {
+    const R = BALANCE.boss.rain;
+    const n = Math.min(R.countMax, Math.round(R.countBase + state.wave * R.countPerWave));
+    rainLeft = n;
+    rainEvery = R.span / Math.max(1, n);
+    rainT = 0;
+    bossStats.rains += 1;
+  }
+
+  function tickRain(dt: number) {
+    if (rainLeft <= 0) return;
+    rainT -= dt;
+    if (rainT > 0) return;
+    rainT = rainEvery;
+    rainLeft -= 1;
+    bossStats.rainSpawned += 1;
+    spawnEnemy(false, undefined, true);
+  }
+
   function killEnemy(index: number) {
     const e = enemies[index];
     if (!e) return;
@@ -1392,7 +1896,11 @@ export function createDefenseMode(hooks: DefenseHooks) {
     if (e.treasure) spawnCoin(e.mesh.position.clone());
     const drop = e.treasure ? null : rollDrop(wasBoss);
     if (drop) spawnDrop(e.mesh.position.clone(), drop);
-    if (wasBoss) clearTeleGhost();
+    if (wasBoss) {
+      clearTeleGhost();
+      clearLaser();
+      rainLeft = 0;
+    }
     disposeObject(e.mesh);
     enemies.splice(index, 1);
     if (!wasBoss) return;
@@ -1584,8 +2092,9 @@ export function createDefenseMode(hooks: DefenseHooks) {
     for (let j = enemies.length - 1; j >= 0; j -= 1) {
       if (enemies[j] === skip || !targetable(enemies[j])) continue;
       if (enemies[j].mesh.position.distanceTo(pos) > radius + visualRadius(enemies[j])) continue;
-      enemies[j].hp -= dmg;
-      if (enemies[j].hp <= 0) killEnemy(j);
+      if (enemies[j].bt) bossDamage(enemies[j], dmg, false, pos, true);
+      else enemies[j].hp -= dmg;
+      if (isDead(enemies[j])) killEnemy(j);
     }
     for (let j = hostiles.length - 1; j >= 0; j -= 1) {
       if (hostiles[j].mesh.position.distanceTo(pos) > radius) continue;
@@ -1603,6 +2112,9 @@ export function createDefenseMode(hooks: DefenseHooks) {
   }
 
   function clearActors() {
+    clearLaser();
+    rainLeft = 0;
+    clearFx();
     for (const e of enemies) disposeObject(e.mesh);
     for (const p of projectiles) disposeObject(p.mesh);
     for (const p of particles) disposeObject(p.mesh);
@@ -1952,10 +2464,12 @@ export function createDefenseMode(hooks: DefenseHooks) {
         if (e.boss) {
           const mat = e.mesh.material as THREE.MeshStandardMaterial;
           mat.emissiveIntensity = 0.65 + Math.sin(performance.now() * 0.008) * 0.35;
-          const halo = e.mesh.children[0];
-          if (halo) halo.rotation.z += dt * 2.4;
-          const ring = e.mesh.children[1];
-          if (ring) ring.rotation.z -= dt * 1.5;
+          if (!e.bt) {
+            const halo = e.mesh.children[0];
+            if (halo) halo.rotation.z += dt * 2.4;
+            const ring = e.mesh.children[1];
+            if (ring) ring.rotation.z -= dt * 1.5;
+          }
           const pos = e.mesh.position;
           const dist = Math.max(0.001, pos.length());
           const hold = bossHold(e.radius);
@@ -1983,8 +2497,12 @@ export function createDefenseMode(hooks: DefenseHooks) {
             }
           } else if (e.entering > 0) {
             /* entra nello schermo prima di tutto il resto */
+          } else if (e.bt?.hold) {
+            /* test: fermo */
           } else if (diving) {
             pos.addScaledVector(tmpA.copy(pos).negate().normalize(), Math.min(0.62, pace + 0.18) * dt);
+          } else if (e.bt && (e.bt.kind === "madre" || e.bt.phase === 2)) {
+            moveBoss(e, dt);
           } else if (dist < hold) {
             pos.addScaledVector(tmpA.copy(pos).normalize(), 0.7 * dt);
           } else {
@@ -1993,7 +2511,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
             // Avvicinamento alla quota d'attesa uguale su lato lungo e lato corto dello schermo.
             if (dist > hold + 0.4) pos.addScaledVector(tmpA.copy(pos).negate().normalize(), Math.min(dist - hold, Math.max(0.6, pace * 1.6)) * dt);
           }
-          if (state.wave >= 3 && e.entering <= 0) {
+          if (!e.bt && state.wave >= 3 && e.entering <= 0) {
             e.shotT -= dt;
             if (e.shotT <= 0) {
               const bb = BALANCE.boss;
@@ -2037,7 +2555,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
         if (e.modeT <= 0) {
           e.modeT = 1.2;
           e.hp -= e.maxHp * 0.12;
-          if (e.hp <= 0) {
+          if (isDead(e)) {
             killEnemy(i);
             continue;
           }
@@ -2045,7 +2563,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
       }
       if (frozen || e.tele > 0) continue;
       if (e.mesh.position.length() < 1.02 + e.radius) {
-        const dmg = e.boss ? 12 + state.wave * 2 : 6 + state.wave;
+        const dmg = e.boss ? 12 + state.wave * 2 : (6 + state.wave) * (e.small ? 0.5 : 1);
         const pos = e.mesh.position.clone();
         if (e.boss) {
           const away = Math.atan2(pos.y, pos.x) + Math.PI;
@@ -2123,6 +2641,12 @@ export function createDefenseMode(hooks: DefenseHooks) {
     if (!state.shop && threats) fireAuto();
     }
 
+    // v24: punto debole, scudi, laser e pioggia dei boss (anche nella sandbox dei test, dove i boss stanno fermi).
+    if (!state.shop && state.freezeLeft <= 0) {
+      tickBosses(dt);
+      if (phase !== "play") return;
+    }
+
     for (let i = projectiles.length - 1; i >= 0; i -= 1) {
       const p = projectiles[i];
       const homing = p.kind === "rada" || p.kind === "ricerca" || p.kind === "termobarica";
@@ -2154,18 +2678,19 @@ export function createDefenseMode(hooks: DefenseHooks) {
       let spent = p.life <= 0 || ranged;
       // Collisioni sul segmento: si prende il bersaglio più vicino, non il primo in lista.
       // Senza pierce il colpo si ferma lì; con pierce ogni nemico viene danneggiato al massimo una volta.
-      if (!spent) {
-        const cand: { t: number; enemy?: Enemy; hostile?: Hostile }[] = [];
+      let bounced = false;
+      if (!spent && !p.dud) {
+        const cand: { t: number; d2: number; enemy?: Enemy; hostile?: Hostile }[] = [];
         for (const h of hostiles) {
           const hit = segClosest(p.prev, p.mesh.position, h.mesh.position);
-          if (hit.d2 <= 0.09) cand.push({ t: hit.t, hostile: h });
+          if (hit.d2 <= 0.09) cand.push({ t: hit.t, d2: hit.d2, hostile: h });
         }
         for (const e of enemies) {
           // Anche un boss ancora in ingresso ferma il colpo (senza danno): niente proiettili che lo attraversano.
           if (p.hits.has(e.id) || !inView(e)) continue;
           const reach = visualRadius(e) + shotPad(p.kind);
           const hit = segClosest(p.prev, p.mesh.position, e.mesh.position);
-          if (hit.d2 <= reach * reach) cand.push({ t: hit.t, enemy: e });
+          if (hit.d2 <= reach * reach) cand.push({ t: hit.t, d2: hit.d2, enemy: e });
         }
         cand.sort((a, b) => a.t - b.t);
         for (const c of cand) {
@@ -2203,12 +2728,18 @@ export function createDefenseMode(hooks: DefenseHooks) {
             spent = true;
             break;
           }
-          e.hp -= p.damage;
+          if (e.bt) {
+            // Scudo del Satellite Madre: il colpo rimbalza, niente danno.
+            if (bossImpact(e, p, at, Math.sqrt(c.d2))) {
+              bounced = true;
+              break;
+            }
+          } else e.hp -= p.damage;
           p.hits.add(e.id);
           p.direct = p.damage > 0 ? e : null;
           burst(at, p.color, Math.min(14, 3 + Math.round(p.damage * 3)));
           const ji = enemies.indexOf(e);
-          if (e.hp <= 0 && ji >= 0) killEnemy(ji);
+          if (ji >= 0 && isDead(e)) killEnemy(ji);
           if (p.pierce > 1) p.pierce -= 1;
           else {
             p.mesh.position.copy(at);
@@ -2217,7 +2748,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
           }
         }
       }
-      if (!spent) continue;
+      if (!spent || bounced) continue;
       const pos = p.mesh.position.clone();
       if (p.kind === "grappolo") {
         const n = BALANCE.missiles.grappolo.bomblets;
@@ -2238,6 +2769,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
     }
 
     tickParticles(dt);
+    tickFx(dt);
   }
 
   function readPointer(e: PointerEvent | TouchEvent) {
@@ -2258,6 +2790,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
     if (!readPointer(e)) return;
     if (!raycaster.ray.intersectPlane(plane, hit)) return;
     const down = e.type === "pointerdown" || e.type === "touchstart";
+    if (down) audio();
     if (down && !state.shop && !place && collectAt(hit)) return;
     if (hit.length() < 0.45) return;
     const a = Math.atan2(hit.y, hit.x);
@@ -2558,6 +3091,9 @@ export function createDefenseMode(hooks: DefenseHooks) {
       enemies.length = 0;
       projectiles.length = 0;
       hostiles.length = 0;
+      clearLaser();
+      rainLeft = 0;
+      clearFx();
       spawnTimer = 0;
       bossWarn = 0;
       trashSpawned = trashQuota;
@@ -2627,6 +3163,65 @@ export function createDefenseMode(hooks: DefenseHooks) {
       };
       enemies.push(e);
       return { id: e.id, radius: e.radius, visual: visualRadius(e) };
+    },
+    /** v24: mette in campo un boss vero (già entrato), di default fermo e con ciclo e attacchi in pausa. */
+    forceBoss: (kind: BossKind, opts: { x?: number; y?: number; hold?: boolean; radius?: number } = {}) => {
+      for (let i = enemies.length - 1; i >= 0; i -= 1) if (enemies[i].boss) {
+        disposeObject(enemies[i].mesh);
+        enemies.splice(i, 1);
+      }
+      clearLaser();
+      rainLeft = 0;
+      const bb = BALANCE.boss;
+      const radius = opts.radius ?? Math.min(bb.radiusMax, bb.radiusBase + state.wave * bb.radiusPerWave);
+      const made = makeBoss(kind, radius);
+      made.bt.hold = opts.hold ?? true;
+      made.mesh.position.set(opts.x ?? 0, opts.y ?? 3.4, 0);
+      hooks.getScene().add(made.mesh);
+      const e: Enemy = {
+        id: enemySeq++, mesh: made.mesh, speed: 0.34 + state.wave * 0.025, hp: made.hp, maxHp: made.hp, boss: true, radius,
+        mode: "in", modeT: 0, strafe: 1, shotT: 99, slow: 0, entering: 0, treasure: false, vel: null, seen: true,
+        tele: 0, teleAngle: 0, bt: made.bt,
+      };
+      enemies.push(e);
+      bossSpawned = true;
+      return e.id;
+    },
+    bossInfo: () => {
+      const e = enemies.find((x) => x.bt);
+      if (!e?.bt) return null;
+      const b = e.bt;
+      return {
+        id: e.id, kind: b.kind, phase: b.phase, exposed: b.exposed, warned: b.warned, hp: e.hp, maxHp: e.maxHp,
+        radius: e.radius, visual: visualRadius(e), x: e.mesh.position.x, y: e.mesh.position.y, r: e.mesh.position.length(),
+        goalR: b.goalR, targetable: targetable(e), shields: b.kind === "madre" ? shieldAngles(e) : [], last: b.last,
+        laser: laser ? { ang: laser.ang, warn: laser.warn, swept: laser.swept } : null, rainLeft,
+        stats: { ...bossStats }, sounds: { ...sounds }, fx: fx.length, aim: aimAngle, earthHP: state.earthHP,
+        enemies: enemies.length, small: enemies.filter((x) => x.small).length,
+      };
+    },
+    bossSet: (o: { exposed?: boolean; hold?: boolean; attack?: "laser" | "rain"; aim?: number; hp?: number; strafe?: number }) => {
+      const e = enemies.find((x) => x.bt);
+      if (!e?.bt) return false;
+      if (o.exposed != null) {
+        e.bt.exposed = o.exposed;
+        e.bt.warned = o.exposed;
+        e.bt.weakT = 0;
+      }
+      if (o.hold != null) e.bt.hold = o.hold;
+      if (o.hp != null) e.hp = o.hp;
+      if (o.strafe != null) e.strafe = o.strafe;
+      if (o.aim != null) aimAngle = o.aim;
+      if (o.attack === "laser") startLaser(e);
+      if (o.attack === "rain") startRain();
+      return true;
+    },
+    /** Fa avanzare il movimento del boss (nella sandbox il ciclo dei nemici è fermo). */
+    bossStep: (dt: number, n = 1) => {
+      const e = enemies.find((x) => x.bt);
+      if (!e?.bt) return null;
+      for (let i = 0; i < n; i += 1) moveBoss(e, dt);
+      return { r: e.mesh.position.length(), goalR: e.bt.goalR };
     },
     fireTest: (opts: { x: number; y: number; vx: number; vy: number; damage?: number; pierce?: number; range?: number }) => {
       const mesh = new THREE.Mesh(GEO.ball, basicMat(0x7dfff0));
