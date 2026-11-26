@@ -726,7 +726,7 @@ const OFFER_ICON: Record<string, () => ReactNode> = {
 };
 
 const OFFER_COPY: Record<string, string> = {
-  "gun-singolo": "Colpo grosso e perforante: passa due nemici.",
+  "gun-singolo": "Colpo grosso e preciso: si ferma sul primo nemico che tocca.",
   "gun-doppio": "Due colpi paralleli sullo stesso mirino.",
   "gun-mitra": "Pioggia di colpi piccoli, un po' imprecisi.",
   "gun-rosa": "Ventaglio a corto raggio, come un colpo a pompa.",

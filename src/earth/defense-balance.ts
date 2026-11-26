@@ -15,8 +15,8 @@ export const BALANCE = {
 
   /** Cannone personale: ogni modalità si sblocca a parte e sale da Liv. 1 a maxLevel. Numeri v20 da Math_Calc. */
   gun: {
-    /** Perforante: proiettile grosso e lento a ricaricare, passa attraverso 2 nemici. */
-    singolo: { base: 55, damage: 1.45, cooldown: 0.42, pellets: 1, damagePerLevel: 0.14, ratePerLevel: 0.03, speed: 7.2, size: 0.058, color: 0x7dfff0, pierce: 2, range: 18, spreadDeg: 0 },
+    /** Proiettile grosso e lento a ricaricare. Dalla v22 non perfora: si ferma sul primo nemico (prima pierce 2). */
+    singolo: { base: 55, damage: 1.45, cooldown: 0.42, pellets: 1, damagePerLevel: 0.14, ratePerLevel: 0.03, speed: 7.2, size: 0.058, color: 0x7dfff0, pierce: 1, range: 18, spreadDeg: 0 },
     /** Due colpi paralleli medi. */
     doppio: { base: 85, damage: 0.85, cooldown: 0.32, pellets: 2, damagePerLevel: 0.13, ratePerLevel: 0.04, speed: 6.6, size: 0.042, color: 0x9dffb0, pierce: 1, range: 18, spreadDeg: 0 },
     /** Pioggia di colpi piccoli e veloci, un po' imprecisi. */

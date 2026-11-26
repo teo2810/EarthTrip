@@ -307,6 +307,9 @@ export function createDefenseMode(hooks: DefenseHooks) {
   const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
   const hit = new THREE.Vector3();
   const savedCam = new THREE.Vector3();
+  /** Rotazione della Terra all'ingresso: in Difesa gira, all'uscita torna allineata a confini, capitali e satelliti. */
+  let savedEarthRot = 0;
+  let exitEarthFrom = 0;
   const savedTarget = new THREE.Vector3();
   const camFrom = new THREE.Vector3();
   const camTo = new THREE.Vector3();
@@ -393,9 +396,18 @@ export function createDefenseMode(hooks: DefenseHooks) {
     return Math.abs(p.x) <= v.w - margin && Math.abs(p.y) <= v.h - margin;
   }
 
-  /** Nemico colpibile: dentro lo schermo e, se boss, già entrato del tutto. */
+  /** Almeno una parte del nemico (raggio visibile) è dentro lo schermo. */
+  function inView(e: Enemy) {
+    return onScreen(e.mesh.position, -visualRadius(e));
+  }
+
+  /**
+   * Nemico colpibile. Detriti e nave tesoro: appena se ne vede un pezzo (prima il centro doveva essere
+   * dentro lo schermo e i colpi attraversavano quelli sul bordo). Boss: solo dopo essere entrato del tutto.
+   */
   function targetable(e: Enemy) {
-    return e.entering <= 0 && onScreen(e.mesh.position, e.boss ? e.radius : 0);
+    if (e.boss) return e.entering <= 0 && onScreen(e.mesh.position, e.radius);
+    return inView(e);
   }
 
   function horizon() {
@@ -1833,6 +1845,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
       if (phase === "exit") {
         flash = Math.max(0, flash - dt * 2.4);
         veil = Math.max(0, veil - dt * 0.72);
+        hooks.getEarth().rotation.y = exitEarthFrom + (savedEarthRot - exitEarthFrom) * e;
       }
       cam.position.lerpVectors(camFrom, camTo, e);
       controls.target.lerpVectors(targetFrom, targetTo, e);
@@ -1847,6 +1860,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
         if (phase === "enter") phase = "play";
         else {
           cam.position.copy(savedCam);
+          hooks.getEarth().rotation.y = savedEarthRot;
           controls.target.copy(savedTarget);
           controls.enabled = true;
           phase = "idle";
@@ -2147,7 +2161,8 @@ export function createDefenseMode(hooks: DefenseHooks) {
           if (hit.d2 <= 0.09) cand.push({ t: hit.t, hostile: h });
         }
         for (const e of enemies) {
-          if (p.hits.has(e.id) || !targetable(e)) continue;
+          // Anche un boss ancora in ingresso ferma il colpo (senza danno): niente proiettili che lo attraversano.
+          if (p.hits.has(e.id) || !inView(e)) continue;
           const reach = visualRadius(e) + shotPad(p.kind);
           const hit = segClosest(p.prev, p.mesh.position, e.mesh.position);
           if (hit.d2 <= reach * reach) cand.push({ t: hit.t, enemy: e });
@@ -2177,7 +2192,17 @@ export function createDefenseMode(hooks: DefenseHooks) {
             continue;
           }
           const e = c.enemy;
-          if (!e || p.hits.has(e.id) || !targetable(e)) continue;
+          if (!e || p.hits.has(e.id) || enemies.indexOf(e) < 0) continue;
+          if (!targetable(e)) {
+            // Boss non ancora colpibile: il colpo si spegne sullo scafo, senza danno né esplosione.
+            burst(at, 0x9aa4b2, 3);
+            p.mesh.position.copy(at);
+            p.blast = 0;
+            p.blastDmg = 0;
+            p.kind = "msingle";
+            spent = true;
+            break;
+          }
           e.hp -= p.damage;
           p.hits.add(e.id);
           p.direct = p.damage > 0 ? e : null;
@@ -2285,6 +2310,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
     const controls = hooks.getControls();
     savedCam.copy(cam.position);
     savedTarget.copy(controls.target);
+    savedEarthRot = hooks.getEarth().rotation.y;
     camFrom.copy(cam.position);
     camTo.set(0, 0, viewZ(cam as THREE.PerspectiveCamera));
     targetFrom.copy(controls.target);
@@ -2312,6 +2338,10 @@ export function createDefenseMode(hooks: DefenseHooks) {
     camTo.copy(savedCam);
     targetFrom.copy(controls.target);
     targetTo.copy(savedTarget);
+    // Rientro sul giro più corto: la texture torna dove stanno confini e capitali.
+    const spin = hooks.getEarth().rotation.y - savedEarthRot;
+    exitEarthFrom = savedEarthRot + Math.atan2(Math.sin(spin), Math.cos(spin));
+    hooks.getEarth().rotation.y = exitEarthFrom;
     camT = 0;
     phase = "exit";
     hooks.restoreSim();
@@ -2537,7 +2567,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
       state.shop = false;
       state.earthHP = 100;
     },
-    spawnDummy: (opts: { x: number; y: number; radius?: number; hp?: number; boss?: boolean; treasure?: boolean }) => {
+    spawnDummy: (opts: { x: number; y: number; radius?: number; hp?: number; boss?: boolean; treasure?: boolean; entering?: number }) => {
       const radius = opts.radius ?? 0.16;
       const boss = !!opts.boss;
       const treasure = !!opts.treasure;
@@ -2588,7 +2618,7 @@ export function createDefenseMode(hooks: DefenseHooks) {
         strafe: 1,
         shotT: 99,
         slow: 0,
-        entering: 0,
+        entering: opts.entering ?? 0,
         treasure,
         vel: null,
         seen: true,

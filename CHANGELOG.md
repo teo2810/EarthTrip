@@ -1,5 +1,15 @@
 # Changelog
 
+## v22 · 2026-11-26
+
+Correzioni sulla v21 (`1518c38`).
+
+- Colpi che attraversavano i nemici: il Singolo, l'arma di partenza, aveva `pierce: 2` e ogni suo colpo proseguiva oltre il primo nemico. Ora nessuna arma perfora; il testo dello shop è aggiornato.
+- Detriti e nave tesoro si possono colpire appena se ne vede un pezzo (prima serviva il centro dentro lo schermo e i colpi passavano su quelli al bordo).
+- Il boss ancora in ingresso ferma i colpi senza subire danno, invece di farsi attraversare.
+- Capitali e confini fuori posto dopo una partita: in Difesa la Terra gira e all'uscita la rotazione restava. Ora torna allineata (giro più corto) a confini, capitali, satelliti e mappa.
+- Nomi in italiano per Città del Vaticano e Lubiana.
+
 ## v21 · 2026-11-26
 
 Correzioni sulla v20 (`07b5b31`).

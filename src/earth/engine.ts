@@ -2237,6 +2237,13 @@ const IT_CITY: Record<string, string> = {
   Florence: "Firenze",
   Cairo: "Il Cairo",
   "The Hague": "L'Aia",
+  "Vatican City": "Città del Vaticano",
+  Ljubljana: "Lubiana",
+  Washington: "Washington",
+  "Washington, D.C.": "Washington",
+  London: "Londra",
+  Tokyo: "Tokyo",
+  "Buenos Aires": "Buenos Aires",
 };
 
 function zoomFromAlt(altKm: number) {
