@@ -1,5 +1,12 @@
 # Changelog
 
+## v25 · 2026-11-26
+
+- Doppio caricamento all'apertura: la causa era lo script di registrazione del service worker. Dalla v20 il nuovo SW chiamava `skipWaiting()` e la pagina, a ogni `controllerchange` con un SW già installato, si ricaricava da sola (`location.reload()`): chi riapriva l'app dopo un rilascio vedeva il primo avvio e, pochi secondi dopo, un secondo. Ora la pagina si limita a registrare il SW, il nuovo SW non usa `skipWaiting` e prende il controllo al prossimo avvio. L'HTML resta rete-prima, quindi i file nuovi arrivano comunque subito. Verificato su profilo nuovo e su profilo con un SW precedente (un solo documento caricato).
+- Vista di default leggera: confini, capitali e atmosfera; satelliti solo in orbita bassa (ISS, Tiangong, Hubble, scientifici e qualche Starlink) con le tracce dei principali. Nubi, luci notturne, MEO, GEO/HEO e dettagli lunari restano attivabili dal pannello. Le scelte dell'utente si salvano (`earthtrip-flags`, solo gli interruttori toccati) e hanno la precedenza.
+- Scheda del satellite: a cosa serve, missione, operatore e lancio. Tabella statica per i satelliti noti (ISS, Tiangong, Hubble, Starlink, GPS per serie, Galileo, GLONASS, Sentinel, NOAA, GOES, Meteosat, Himawari, Terra, Aqua, Aura, Landsat, TESS, Fermi, Swift, Chandra, XMM, IXPE, Hinode, INTEGRAL) con ripiego generico per categoria e orbita. I campi incerti sono omessi.
+- Sigle LEO, MEO, GEO, HEO, SSO e GNSS: spiegazione in italiano al passaggio del mouse, alla tastiera o con un tocco, più una mini legenda con una riga per sigla nel pannello Satelliti.
+
 ## v24 · 2026-11-26
 
 - Nuovo sistema dei boss al posto del vecchio, alternati per ondata: **Satellite Madre** (dispari) e **Asteroide Anomalo** (pari).

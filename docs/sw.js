@@ -1,11 +1,11 @@
 // Service worker di EarthTrip. La versione viene aggiornata da scripts/build-docs.mjs.
-const CACHE = "earthtrip-v24";
+const CACHE = "earthtrip-v25";
 // Texture, GeoJSON e TLE dai CDN: cache separata che sopravvive ai rilasci.
 const ASSETS_CACHE = "earth-assets-v1";
 const SHELL = [
   "./",
   "./index.html",
-  "./app-v24.js",
+  "./app-v25.js",
   "./style.css",
   "./favicon.svg",
   "./manifest.json",
@@ -23,6 +23,8 @@ const WARM = [
   "https://cdn.jsdelivr.net/gh/mrdoob/three.js@r160/examples/textures/planets/moon_1024.jpg",
 ];
 
+// v25: niente skipWaiting. Con un SW già attivo il nuovo aspetta la chiusura delle schede e comanda al prossimo avvio,
+// così la pagina aperta non cambia sotto i piedi e non si ricarica. L'HTML è comunque rete-prima: i file nuovi arrivano subito.
 self.addEventListener("install", (e) => {
   e.waitUntil(
     caches.open(CACHE)
@@ -31,8 +33,7 @@ self.addEventListener("install", (e) => {
         caches.open(ASSETS_CACHE).then((c) =>
           Promise.all(WARM.map((url) => c.match(url).then((hit) => hit || fetch(url, { mode: "cors" }).then((res) => res.ok && c.put(url, res)).catch(() => {})))),
         );
-      })
-      .then(() => self.skipWaiting()),
+      }),
   );
 });
 

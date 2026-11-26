@@ -23,26 +23,58 @@ export type Flags = {
   astro: boolean;
 };
 
+/**
+ * Vista di default leggera (v25): globo con confini e capitali, atmosfera, e solo le orbite basse (ISS, Tiangong, Hubble,
+ * i satelliti scientifici e qualche Starlink) con le tracce dei satelliti in evidenza. Il resto si accende dal pannello.
+ * Le scelte salvate dall'utente (`earthtrip-flags`) hanno la precedenza.
+ */
 export const DEFAULT_FLAGS: Flags = {
   orbits: true,
   allOrbits: false,
-  nightLights: true,
+  nightLights: false,
   atmosphere: true,
-  clouds: true,
+  clouds: false,
   satellites: true,
-  moonLabels: true,
-  moonSites: true,
+  moonLabels: false,
+  moonSites: false,
   trueMoon: false,
   borders: true,
   capitals: true,
   leo: true,
-  meo: true,
-  geo: true,
+  meo: false,
+  geo: false,
   leoOrbits: true,
   meoOrbits: false,
-  geoOrbits: true,
+  geoOrbits: false,
   astro: false,
 };
+
+export const FLAGS_KEY = "earthtrip-flags";
+
+/** Preferenze salvate: solo chiavi note con valore booleano, sopra i default. */
+export function loadFlags(): Flags {
+  const out: Flags = { ...DEFAULT_FLAGS };
+  try {
+    const raw = typeof localStorage === "undefined" ? null : localStorage.getItem(FLAGS_KEY);
+    if (!raw) return out;
+    const saved = JSON.parse(raw) as Record<string, unknown>;
+    for (const k of Object.keys(DEFAULT_FLAGS) as (keyof Flags)[]) if (typeof saved[k] === "boolean") out[k] = saved[k] as boolean;
+  } catch {
+    /* preferenze illeggibili: restano i default */
+  }
+  return out;
+}
+
+/** Salva solo la scelta toccata: le altre seguono i default della versione. */
+export function saveFlag<K extends keyof Flags>(key: K, value: boolean) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(FLAGS_KEY) || "{}") as Record<string, unknown>;
+    saved[key] = value;
+    localStorage.setItem(FLAGS_KEY, JSON.stringify(saved));
+  } catch {
+    /* archivio pieno o bloccato */
+  }
+}
 
 export type Selection =
   | {

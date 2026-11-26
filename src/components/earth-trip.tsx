@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 import { Axis3d, Globe2, Map, Moon, Satellite, SlidersHorizontal, X } from "lucide-react";
-import { DEFAULT_FLAGS, type EarthApi, type Flags, type Telemetry } from "@/earth/types";
+import { loadFlags, saveFlag, type EarthApi, type Flags, type Telemetry } from "@/earth/types";
+import { ACRONYMS, isSunSync, satInfo } from "@/earth/sat-info";
 import { BALANCE } from "@/earth/defense-balance";
 
 const EMPTY: Telemetry = {
@@ -27,19 +28,15 @@ const GROUP_LABEL = {
   starlink: "Starlink",
 } as const;
 
-const REGIME_LABEL = {
-  leo: "LEO",
-  meo: "MEO",
-  geo: "GEO / HEO",
-} as const;
-
 export function EarthTrip() {
   const stageRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<EarthApi | null>(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tel, setTel] = useState<Telemetry>(EMPTY);
-  const [flags, setFlags] = useState<Flags>(DEFAULT_FLAGS);
+  const [flags, setFlags] = useState<Flags>(loadFlags);
+  const flagsRef = useRef<Flags>(flags);
+  flagsRef.current = flags;
   const [hours, setHours] = useState(0);
   const [panel, setPanel] = useState(false);
   const [section, setSection] = useState<"visual" | "sats" | "moon" | null>("visual");
@@ -135,6 +132,7 @@ export function EarthTrip() {
         onError: (message) => setError(message),
       });
       apiRef.current = api;
+      api.setFlags(flagsRef.current);
       dispose = () => api.dispose();
     });
     return () => {
@@ -153,7 +151,11 @@ export function EarthTrip() {
   }, [hours]);
 
   function toggle<K extends keyof Flags>(key: K) {
-    setFlags((prev) => ({ ...prev, [key]: !prev[key] }));
+    // Solo chi tocca un interruttore salva le preferenze: gli altri seguono i default della versione.
+    const next = { ...flagsRef.current, [key]: !flagsRef.current[key] };
+    flagsRef.current = next;
+    saveFlag(key, next[key]);
+    setFlags(next);
   }
 
   const sim = hours !== 0;
@@ -290,14 +292,14 @@ export function EarthTrip() {
               <h2>{sel.name}</h2>
               <p>
                 {sel.kind === "sat"
-                  ? [
+                  ? joinDot([
                       sel.mission === "crew" ? "Equipaggio" : sel.mission === "science" ? "Scienza" : GROUP_LABEL[sel.group],
+                      sel.group === "nav" ? <Acr key="gnss" k="GNSS" /> : null,
                       sel.agency,
-                      REGIME_LABEL[sel.regime],
+                      regimeNodes(sel.regime),
+                      isSunSync(sel.regime, sel.altKm, sel.incDeg) ? <Acr key="sso" k="SSO" /> : null,
                       `NORAD ${sel.norad}`,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")
+                    ])
                   : "Selenografia"}
               </p>
             </div>
@@ -342,6 +344,7 @@ export function EarthTrip() {
               {sel.blurb} {fmtLat(sel.lat)} {fmtLon(sel.lon)}.
             </p>
           )}
+          {sel.kind === "sat" ? <SatFacts sel={sel} /> : null}
           <div className="et-card-actions">
             <button type="button" className="et-text-btn is-on" onClick={() => apiRef.current?.focusSelection()}>
               Inquadra
@@ -448,7 +451,7 @@ export function EarthTrip() {
           <Switch label="Satelliti" on={flags.satellites} onClick={() => toggle("satellites")} />
           <div className={flags.satellites ? undefined : "et-dim"}>
             <Band
-              label="LEO"
+              label={<Acr k="LEO" />}
               hint="Sotto 2.000 km"
               on={flags.leo}
               traces={flags.leoOrbits}
@@ -456,7 +459,7 @@ export function EarthTrip() {
               onTraces={() => toggle("leoOrbits")}
             />
             <Band
-              label="MEO"
+              label={<Acr k="MEO" />}
               hint="2.000 – 35.786 km"
               on={flags.meo}
               traces={flags.meoOrbits}
@@ -464,7 +467,7 @@ export function EarthTrip() {
               onTraces={() => toggle("meoOrbits")}
             />
             <Band
-              label="GEO / HEO"
+              label={<><Acr k="GEO" /> / <Acr k="HEO" /></>}
               hint="Oltre 35.786 km"
               on={flags.geo}
               traces={flags.geoOrbits}
@@ -481,12 +484,20 @@ export function EarthTrip() {
               <i className="science" /> Scienza
             </span>
             <span>
-              <i className="nav" /> MEO
+              <i className="nav" /> <Acr k="MEO" />
             </span>
             <span>
-              <i className="geo" /> GEO
+              <i className="geo" /> <Acr k="GEO" />
             </span>
           </div>
+          <dl className="et-acr-legend" aria-label="Sigle delle orbite">
+            {(["LEO", "MEO", "GEO", "HEO", "SSO", "GNSS"] as const).map((k) => (
+              <div key={k}>
+                <dt>{k}</dt>
+                <dd>{ACRONYMS[k]}</dd>
+              </div>
+            ))}
+          </dl>
         </Accordion>
         <Accordion title="Dettagli Luna" open={section === "moon"} onToggle={() => setSection((s) => (s === "moon" ? null : "moon"))}>
           <Switch label="Mari principali" on={flags.moonLabels} onClick={() => toggle("moonLabels")} />
@@ -526,7 +537,7 @@ function Band({
   onToggle,
   onTraces,
 }: {
-  label: string;
+  label: ReactNode;
   hint: string;
   on: boolean;
   traces: boolean;
@@ -548,6 +559,101 @@ function Band({
         </button>
       </div>
     </div>
+  );
+}
+
+function regimeNodes(r: "leo" | "meo" | "geo"): ReactNode {
+  if (r === "geo") return <span key="geo"><Acr k="GEO" /> / <Acr k="HEO" /></span>;
+  return <Acr key={r} k={r === "leo" ? "LEO" : "MEO"} />;
+}
+
+function joinDot(parts: ReactNode[]): ReactNode[] {
+  const out: ReactNode[] = [];
+  parts.filter(Boolean).forEach((p, i) => {
+    if (i > 0) out.push(" · ");
+    out.push(p);
+  });
+  return out;
+}
+
+/** Sigla con spiegazione: al passaggio del mouse, alla tastiera o con un tocco (si chiude con un secondo tocco, Esc o toccando altrove). */
+function Acr({ k }: { k: keyof typeof ACRONYMS }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
+  const ref = useRef<HTMLButtonElement>(null);
+  const show = () => {
+    const r = ref.current?.getBoundingClientRect();
+    if (!r) return;
+    const left = Math.max(8, Math.min(window.innerWidth - 268, r.left));
+    setPos(r.top > window.innerHeight / 2 ? { left, bottom: window.innerHeight - r.top + 6 } : { left, top: r.bottom + 6 });
+    setOpen(true);
+  };
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: Event) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const esc = (e: globalThis.KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("pointerdown", away);
+    document.addEventListener("keydown", esc);
+    window.addEventListener("scroll", () => setOpen(false), { once: true, capture: true });
+    return () => {
+      document.removeEventListener("pointerdown", away);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [open]);
+  return (
+    <>
+      <button
+        ref={ref}
+        type="button"
+        className="et-acr"
+        aria-expanded={open}
+        aria-label={`${k}: ${ACRONYMS[k]}`}
+        onClick={() => (open ? setOpen(false) : show())}
+        onPointerEnter={(e) => e.pointerType === "mouse" && show()}
+        onPointerLeave={(e) => e.pointerType === "mouse" && setOpen(false)}
+        onFocus={() => ref.current?.matches(":focus-visible") && show()}
+        onBlur={() => setOpen(false)}
+      >
+        {k}
+      </button>
+      {open && pos ? (
+        <span role="tooltip" className="et-acr-tip" style={pos}>
+          <b>{k}</b> {ACRONYMS[k]}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+type SatSel = Extract<NonNullable<Telemetry["selection"]>, { kind: "sat" }>;
+
+/** Curiosità sul satellite scelto: a cosa serve, missione, operatore, lancio (solo se noti). */
+function SatFacts({ sel }: { sel: SatSel }) {
+  const info = satInfo(sel.name, sel.norad, sel.group, sel.regime);
+  return (
+    <dl className="et-facts" aria-label="Curiosità">
+      <div>
+        <dt>A cosa serve</dt>
+        <dd>{info.purpose}</dd>
+      </div>
+      {info.mission ? (
+        <div>
+          <dt>Missione</dt>
+          <dd>{info.mission}</dd>
+        </div>
+      ) : null}
+      {info.operator || info.year ? (
+        <div>
+          <dt>{info.operator ? "Operatore" : "Lancio"}</dt>
+          <dd>
+            {info.operator ?? info.year}
+            {info.operator && info.year ? ` · lancio ${info.year}` : ""}
+          </dd>
+        </div>
+      ) : null}
+    </dl>
   );
 }
 

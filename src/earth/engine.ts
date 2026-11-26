@@ -476,6 +476,15 @@ export function mountEarth(
     const debugWin = window as unknown as { __etDefense?: typeof defense; __etEarth?: Record<string, unknown> };
     debugWin.__etDefense = defense;
     debugWin.__etEarth = {
+      /** Test: seleziona un satellite per numero NORAD (null se non c'è) e dice nome, gruppo e orbita. */
+      selectNorad: (n: number) => {
+        const sat = sats.find((x) => x.raw.norad === n);
+        if (!sat) return null;
+        selectedNorad = n;
+        publish(true);
+        return { name: sat.raw.name, group: sat.group, regime: sat.regime };
+      },
+      satList: () => sats.map((x) => ({ norad: x.raw.norad, name: x.raw.name, group: x.group, regime: x.regime })),
       globe: () => {
         const dist = camera.position.length();
         const look = lookAtEarth();
